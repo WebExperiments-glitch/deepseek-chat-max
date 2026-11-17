@@ -376,3 +376,8 @@ export const stats = () => ({
 })
 
 export const dbFile = DB_FILE
+
+/** 关闭数据库；测试或进程退出前调用，确保 WAL 文件释放 */
+export const closeDb = () => {
+  db.close()
+}

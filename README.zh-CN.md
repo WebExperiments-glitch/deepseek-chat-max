@@ -2,30 +2,28 @@
 
 [English](README.md) | 简体中文
 
-基于 DeepSeek API 的静态聊天示例。无需应用后端，浏览器直接请求配置的 API 服务。
-
-点击 [在线体验](https://deepseek-ai.github.io/chat-demo/) 即可使用，也可以前往 [Releases](https://github.com/deepseek-ai/deepseek-chat-demo/releases) 下载压缩包，解压后双击 `index.html` 在本地使用，无需安装或构建。首次使用时，请在设置中填写 API Key。
+本地优先的 DeepSeek 聊天应用。仅监听本机的 Node 服务把会话、附件和长期记忆存进 SQLite；浏览器仍直接请求配置的 API 服务。
 
 ## 运行
 
 准备 Node.js 22.12+ 和 pnpm：
 
 ```sh
-git clone https://github.com/deepseek-ai/chat-demo.git
-cd chat-demo
 pnpm install
-pnpm dev
+pnpm dev:server   # 终端 1：SQLite 服务，127.0.0.1:8787
+pnpm dev          # 终端 2：页面，http://localhost:8090
 ```
 
 打开 http://localhost:8090 。
 
-生成静态产物：
+生产模式由同一个本地服务托管页面与 API：
 
 ```sh
 pnpm build
+pnpm start
 ```
 
-产物位于 `dist/`，可部署到静态服务器，也可直接打开 `dist/index.html`。直接打开时，浏览器和 API 服务需允许 `file://` 页面的存储与跨域请求。
+打开 http://127.0.0.1:8787 。数据库会自动创建在 `data/chat-demo.db`，`data/` 已加入 `.gitignore`。
 
 ## 功能
 
@@ -37,7 +35,7 @@ pnpm build
 
 ## 数据
 
-API Key 和设置保存在浏览器 localStorage，会话及附件原件保存在 IndexedDB，本地数据按浏览器用户配置和站点源（origin）隔离。发送对话、上传附件和使用语音功能时，相应内容会提交给配置的 API 服务。
+API Key 和设置保存在浏览器 localStorage；会话、附件原件和长期记忆由本机 Node 服务写入 SQLite。服务只绑定 `127.0.0.1`，不暴露鉴权入口。首次启动会把旧的 IndexedDB / sql.js 数据迁移进 SQLite，旧库保留作为回滚点。
 
 设置中的历史导入导出使用 ZIP 格式。导入会在确认并校验成功后替换全部本地会话和附件；导出包含会话与本地可用的图片原件，不包含 API Key、设置或非图片附件原件。格式与保留范围见[历史导入导出](src/services/chat/history/README.md)。
 
@@ -45,13 +43,16 @@ API Key 和设置保存在浏览器 localStorage，会话及附件原件保存�
 
 ## 开发
 
-| 命令          | 用途                |
-| ------------- | ------------------- |
-| `pnpm dev`    | 启动开发服务器      |
-| `pnpm build`  | 构建到 `dist/`      |
-| `pnpm type`   | TypeScript 类型检查 |
-| `pnpm lint`   | oxlint 检查         |
-| `pnpm format` | oxfmt 格式化        |
+| 命令              | 用途                          |
+| ----------------- | ----------------------------- |
+| `pnpm dev`        | 启动 Rspack 页面开发服务器    |
+| `pnpm dev:server` | 启动 127.0.0.1:8787 SQLite 服务 |
+| `pnpm build`      | 构建到 `dist/`                |
+| `pnpm start`      | 托管 `dist/` 与 API（8787）   |
+| `pnpm type`       | TypeScript 类型检查           |
+| `pnpm lint`       | oxlint 检查                   |
+| `pnpm test:server`| 运行 SQLite 数据层测试        |
+| `pnpm format`     | oxfmt 格式化                  |
 
 [rspack.config.ts](rspack.config.ts) 默认连接 `https://api.deepseek.com`。`createConfig({ apiOrigin, devServer })` 支持自定义 API 地址和开发服务器代理。
 

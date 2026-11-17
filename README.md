@@ -2,30 +2,28 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A static chat demo powered by the DeepSeek API. No application backend is required: the browser connects directly to the configured API service.
-
-You can [try the app online](https://deepseek-ai.github.io/chat-demo/) or download the archive from [Releases](https://github.com/deepseek-ai/deepseek-chat-demo/releases), extract it, and double-click `index.html` to use it locally without installation or a build. Enter your API key in Settings before your first chat.
+A local-first chat app powered by the DeepSeek API. A loopback-only Node service stores conversations, attachments, and long-term memory in SQLite; the browser talks to the configured API service directly.
 
 ## Getting started
 
 Install Node.js 22.12+ and pnpm, then run:
 
 ```sh
-git clone https://github.com/deepseek-ai/chat-demo.git
-cd chat-demo
 pnpm install
-pnpm dev
+pnpm dev:server   # terminal 1: SQLite API on 127.0.0.1:8787
+pnpm dev          # terminal 2: UI on http://localhost:8090
 ```
 
 Open http://localhost:8090.
 
-To build the static site:
+For a production build served by the same local service:
 
 ```sh
 pnpm build
+pnpm start
 ```
 
-The output is written to `dist/`. Deploy it to a static web server or open `dist/index.html` directly. Opening the file directly requires browser support for storage on `file://` pages and an API service that permits their cross-origin requests.
+Open http://127.0.0.1:8787. The SQLite database is created automatically at `data/chat-demo.db`; the `data/` directory is ignored by git.
 
 ## Features
 
@@ -37,7 +35,7 @@ The output is written to `dist/`. Deploy it to a static web server or open `dist
 
 ## Data and storage
 
-Your API key and settings are stored in the browser's localStorage. Conversations and original attachments are stored in IndexedDB. Local data is isolated by browser profile and site origin. Sending messages, uploading attachments, and using speech features sends the relevant content to the configured API service.
+Your API key and settings are stored in the browser's localStorage. Conversations, original attachments, and long-term memory are stored in SQLite by the local Node service. The service binds `127.0.0.1` only and does not expose an authentication surface. Existing IndexedDB or sql.js data is migrated into SQLite on first launch; the old stores are kept as a rollback point.
 
 History import and export in Settings use ZIP archives. After confirmation and successful validation, importing replaces all local conversations and attachments. Exports include conversations and locally available original images, but exclude API keys, settings, and original non-image attachments. See the [history import/export documentation (Chinese)](src/services/chat/history/README.md) for the archive format and preservation details.
 
@@ -45,13 +43,16 @@ Settings → Data → Delete all chats clears all local conversations, original 
 
 ## Development
 
-| Command       | Description                  |
-| ------------- | ---------------------------- |
-| `pnpm dev`    | Start the development server |
-| `pnpm build`  | Build into `dist/`           |
-| `pnpm type`   | Run TypeScript type checks   |
-| `pnpm lint`   | Lint with oxlint             |
-| `pnpm format` | Format with oxfmt            |
+| Command          | Description                              |
+| ---------------- | ---------------------------------------- |
+| `pnpm dev`       | Start the Rspack UI dev server           |
+| `pnpm dev:server`| Start the SQLite API on 127.0.0.1:8787   |
+| `pnpm build`     | Build into `dist/`                       |
+| `pnpm start`     | Serve `dist/` and the API on 8787        |
+| `pnpm type`      | Run TypeScript type checks               |
+| `pnpm lint`      | Lint with oxlint                         |
+| `pnpm test:server` | Run SQLite data-layer tests            |
+| `pnpm format`    | Format with oxfmt                        |
 
 [rspack.config.ts](rspack.config.ts) uses `https://api.deepseek.com` by default. Use `createConfig({ apiOrigin, devServer })` to customize the API origin and development server proxy.
 

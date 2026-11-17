@@ -1,7 +1,7 @@
 {
   "name": "chat-demo",
   "version": "0.1.1",
-  "description": "基于 DeepSeek API 的静态聊天示例。",
+  "description": "本地优先的 DeepSeek 聊天应用，数据保存在本机 SQLite。",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -13,6 +13,7 @@
     "build": "rm -rf dist && NODE_ENV=production rspack build -c rspack.config.ts",
     "type": "tsc -p tsconfig.json",
     "lint": "oxlint src rspack.config.ts",
+    "test:server": "node --test scripts/verify-server-db.mjs",
     "format": "oxfmt --write ."
   },
   "dependencies": {
