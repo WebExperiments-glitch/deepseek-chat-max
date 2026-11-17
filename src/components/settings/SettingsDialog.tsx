@@ -1,12 +1,14 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
   IconDownloadOutline16,
+  IconEditOutline16,
   IconFollowsystemOutline16,
   IconLightOutline16,
   IconSettingsOutline16,
+  IconThinkOutline16,
   IconUploadOutline14,
 } from '../base/icons.js'
 import {
@@ -19,10 +21,27 @@ import { useIsMobile } from '../../app/viewport.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
+  EFFORT_LEVELS,
   isChineseBrowser,
+  resetBrand,
+  setAutoCompress,
+  setBrandMode,
+  setBrandText,
+  setCustomSystemPrompt,
+  setDeepseekProtocol,
+  setEffort,
+  setImageDetail,
+  setSafetyCheck,
+  setShowRefusalDetail,
+  setTimeContext,
+  setUserId,
+  type EffortLevel,
   setLocale,
   setLocation,
+  setMaxTokens,
+  setTemperature,
   setThemePreference,
+  setTopP,
   setTtsVoice,
   useSettings,
   type ThemePreference,
@@ -33,6 +52,14 @@ import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
+import { ParamControl } from './ParamControls.js'
+import paramStyles from './ParamControls.module.css'
+import { ProviderSetting } from './ProviderSetting.js'
+import { OFFICIAL_SYSTEM_PROMPT } from '../../services/chat/systemPrompt.js'
+import { createLatestReminder } from '../../services/chat/latestReminder.js'
+import { useModels } from '../../services/models.js'
+import { MemoryPanel } from '../memory/MemoryPanel.js'
+import { FilesManager } from './FilesManager.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import styles from './Settings.module.css'
 
@@ -50,6 +77,16 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
     value: 'general',
     label: 'settingDialogAsideGeneralOptionLabel',
     icon: <IconSettingsOutline16 />,
+  },
+  {
+    value: 'chat',
+    label: 'settingsChatSection',
+    icon: <IconEditOutline16 />,
+  },
+  {
+    value: 'memory',
+    label: 'settingDialogAsideMemoryOptionLabel',
+    icon: <IconThinkOutline16 />,
   },
   { value: 'data', label: 'settingDialogAsideDataOptionLabel', icon: <IconDataOutline16 /> },
 ]
@@ -96,14 +133,21 @@ const SettingsContent = () => {
         <div role="tabpanel" className={styles.content}>
           {section === 'general' ? (
             <>
+              <BrandSetting />
               <ThemeSetting />
               <LocaleSetting />
               <TtsVoiceSetting />
               <LocationSetting />
             </>
+          ) : section === 'chat' ? (
+            <ChatSettings />
+          ) : section === 'memory' ? (
+            <MemoryPanel />
           ) : (
             <>
+              <ProviderSetting />
               <ApiKeyField editor={apiKeyEditor} />
+              <FilesManager />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
@@ -205,6 +249,272 @@ const useHistoryDelete = () => {
   }
 }
 
+/**
+ * 对话参数：温度、Top P 与最大输出 Token。
+ * 三个参数在每次发请求时读取，改动立即对下一轮生效，不影响已生成的内容。
+ */
+const ChatSettings = () => {
+  const t = useTranslate()
+  const promptId = useId()
+  const temperature = useSettings((state) => state.temperature)
+  const topP = useSettings((state) => state.topP)
+  const maxTokens = useSettings((state) => state.maxTokens)
+  const customSystemPrompt = useSettings((state) => state.customSystemPrompt)
+  const userId = useSettings((state) => state.userId)
+  const imageDetail = useSettings((state) => state.imageDetail)
+  const safetyCheck = useSettings((state) => state.safetyCheck)
+  const timeContext = useSettings((state) => state.timeContext)
+  const showRefusalDetail = useSettings((state) => state.showRefusalDetail)
+  const deepseekProtocol = useSettings((state) => state.deepseekProtocol)
+  const autoCompress = useSettings((state) => state.autoCompress)
+  const provider = useSettings((state) => state.provider)
+  const model = useSettings((state) => state.models[state.provider]) ?? ''
+  const effort = useSettings((state) => state.effort)
+  // 模型清单给出的能力优先；清单没给时按文档的默认档位与输出上限
+  const listed = useModels((state) => state.lists[provider].find((option) => option.id === model))
+  const effortLevels = listed?.effortLevels ?? EFFORT_LEVELS
+  const maxOutput = listed?.maxOutputTokens ?? 393216
+  return (
+    <>
+      {/* DeepSeek 的两套协议：Messages（默认）与 Responses */}
+      <SettingCell
+        label={t('settingsApiProtocol')}
+        description={t('settingsApiProtocolDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('settingsApiProtocol')}
+            className={styles.effortSelect}
+            value={deepseekProtocol}
+            options={[
+              { value: 'messages', label: t('protocolMessages') },
+              { value: 'responses', label: t('protocolResponses') },
+            ]}
+            onChange={(value) => setDeepseekProtocol(value as 'messages' | 'responses')}
+          />
+        }
+      />
+
+      {/* 自定义系统提示词：留空即官方身份说明，压缩摘要会自动接在末尾 */}
+      <div className={paramStyles.promptCell}>
+        <label className={paramStyles.promptLabel} htmlFor={promptId}>
+          {t('settingsSystemPrompt')}
+        </label>
+        <p className={paramStyles.promptDescription}>{t('settingsSystemPromptDescription')}</p>
+        <textarea
+          id={promptId}
+          className={paramStyles.promptArea}
+          rows={4}
+          value={customSystemPrompt}
+          placeholder={OFFICIAL_SYSTEM_PROMPT}
+          onChange={(event) => setCustomSystemPrompt(event.target.value)}
+        />
+      </div>
+
+      <SettingCell
+        label={t('settingsSafetyCheck')}
+        description={t('settingsSafetyCheckDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={safetyCheck}
+            aria-label={t('settingsSafetyCheck')}
+            onChange={(event) => setSafetyCheck(event.target.checked)}
+          />
+        }
+      />
+
+      <SettingCell
+        label={t('settingsTimeContext')}
+        description={t('settingsTimeContextDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={timeContext}
+            aria-label={t('settingsTimeContext')}
+            onChange={(event) => setTimeContext(event.target.checked)}
+          />
+        }
+      />
+
+      <SettingCell
+        label={t('settingsShowRefusalDetail')}
+        description={t('settingsShowRefusalDetailDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={showRefusalDetail}
+            aria-label={t('settingsShowRefusalDetail')}
+            onChange={(event) => setShowRefusalDetail(event.target.checked)}
+          />
+        }
+      />
+
+      <SettingCell
+        label={t('settingsImageDetail')}
+        description={t('settingsImageDetailDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('settingsImageDetail')}
+            className={styles.effortSelect}
+            value={imageDetail}
+            options={[
+              { value: 'auto', label: t('imageDetailAuto') },
+              { value: 'low', label: t('imageDetailLow') },
+              { value: 'high', label: t('imageDetailHigh') },
+            ]}
+            onChange={(value) => setImageDetail(value as 'auto' | 'low' | 'high')}
+          />
+        }
+      />
+
+      <SettingCell
+        label={t('settingsUserId')}
+        description={t('settingsUserIdDescription')}
+        status={null}
+        action={
+          <input
+            className={paramStyles.textInput}
+            value={userId}
+            placeholder={t('settingsUserIdPlaceholder')}
+            aria-label={t('settingsUserId')}
+            onChange={(event) => setUserId(event.target.value)}
+          />
+        }
+      />
+
+      <SettingCell
+        label={t('settingsAutoCompress')}
+        description={t('settingsAutoCompressDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={autoCompress}
+            aria-label={t('settingsAutoCompress')}
+            onChange={(event) => setAutoCompress(event.target.checked)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('settingsTemperature')}
+        description={t('settingsTemperatureDescription')}
+        status={null}
+        className={paramStyles.cell}
+        action={
+          <ParamControl
+            label={t('settingsTemperature')}
+            value={temperature}
+            min={0}
+            max={2}
+            step={0.05}
+            onChange={(value) => setTemperature(value ?? 1)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('settingsTopP')}
+        description={t('settingsTopPDescription')}
+        status={null}
+        className={paramStyles.cell}
+        action={
+          <ParamControl
+            label={t('settingsTopP')}
+            value={topP}
+            min={0.01}
+            max={1}
+            step={0.01}
+            onChange={(value) => setTopP(value ?? 1)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('settingsEffort')}
+        description={t('settingsEffortDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('settingsEffort')}
+            className={styles.effortSelect}
+            value={effort ?? ''}
+            options={[
+              { value: '', label: t('settingsEffortDefault') },
+              ...effortLevels.map((level) => ({ value: level, label: level })),
+            ]}
+            onChange={(value) => setEffort(value === '' ? null : (value as EffortLevel))}
+          />
+        }
+      />
+      <SettingCell
+        label={t('settingsMaxTokens')}
+        description={t('settingsMaxTokensDescription')}
+        status={null}
+        className={paramStyles.cell}
+        action={
+          <ParamControl
+            label={t('settingsMaxTokens')}
+            value={maxTokens}
+            min={1}
+            // 上限取模型清单的 max_output_tokens（393216），清单未知时按文档默认
+            max={maxOutput}
+            step={1}
+            optional
+            onChange={setMaxTokens}
+          />
+        }
+      />
+    </>
+  )
+}
+
+/** 品牌标识：默认 DeepSeek lockup，也可以换成任意文字；随时可复原 */
+const BrandSetting = () => {
+  const t = useTranslate()
+  const brandMode = useSettings((state) => state.brandMode)
+  const brandText = useSettings((state) => state.brandText)
+  return (
+    <SettingCell
+      label={t('settingsBrand')}
+      description={t('settingsBrandDescription')}
+      status={null}
+      action={
+        <div className={styles.brandControls}>
+          <Select
+            ariaLabel={t('settingsBrand')}
+            className={styles.brandSelect}
+            value={brandMode}
+            options={[
+              { value: 'logo', label: t('brandModeLogo') },
+              { value: 'text', label: t('brandModeText') },
+            ]}
+            onChange={(value) => setBrandMode(value as 'logo' | 'text')}
+          />
+          {brandMode === 'text' ? (
+            <input
+              className={paramStyles.textInput}
+              value={brandText}
+              placeholder={t('appName')}
+              aria-label={t('brandModeText')}
+              onChange={(event) => setBrandText(event.target.value)}
+            />
+          ) : null}
+          <Button variant="outlined" size="s" onClick={resetBrand}>
+            {t('brandReset')}
+          </Button>
+        </div>
+      }
+    />
+  )
+}
+
 const LocationSetting = () => {
   const t = useTranslate()
   const locale = useSettings((state) => state.locale)
@@ -214,9 +524,12 @@ const LocationSetting = () => {
       ? provinces.find((item) => item.code === location.province)
       : undefined
 
+  // 让用户看到真实下发的 latest_reminder，位置填没填一眼就知道
+  const reminder = createLatestReminder({ locale, location })
   return (
     <SettingCell
       label={t('settingsLocation')}
+      description={t('settingsLocationPreview', { value: reminder })}
       status={null}
       className={styles.locationCell}
       action={

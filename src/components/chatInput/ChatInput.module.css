@@ -251,6 +251,64 @@
   min-width: 0;
 }
 
+/* + 号工具入口：与原来的附件按钮同尺寸，圆形 */
+.plusButton {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* + 与工具标签之间的细分隔线 */
+.toolDivider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 20px;
+  background-color: var(--dsw-alias-border-l2);
+}
+
+/* 选中的工具标签：浅色底 + 品牌色文字，点 × 收起 */
+.toolChip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 10px;
+  background-color: var(--dsw-alias-interactive-bg-hover-accent);
+  color: var(--dsw-alias-brand-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.chipClose {
+  margin-left: 2px;
+  color: var(--dsw-alias-label-caption);
+  font-size: 14px;
+  line-height: 1;
+}
+
 .collapsedToggles .toggleLabel {
   display: none;
 }

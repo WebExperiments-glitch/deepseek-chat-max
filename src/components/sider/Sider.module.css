@@ -34,6 +34,14 @@
   color: var(--dsw-alias-brand-primary);
 }
 
+/* 品牌 lockup：高度对齐原来的文字基线，宽度按比例 */
+.brandLogo {
+  display: block;
+  height: 22px;
+  width: auto;
+  color: var(--dsw-alias-brand-primary);
+}
+
 .newChat {
   position: relative;
   display: flex;

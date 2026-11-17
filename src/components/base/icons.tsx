@@ -213,6 +213,17 @@ export const IconPanelLeftOutline16 = () => (
   </svg>
 )
 
+export const IconPlusOutline16 = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+    <path
+      d="M8 3.2v9.6M3.2 8h9.6"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
 export const IconPaperclipOutline16 = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path

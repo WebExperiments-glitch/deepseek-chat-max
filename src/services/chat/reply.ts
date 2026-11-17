@@ -164,6 +164,91 @@ export const getReplyText = (reply: AssistantMessage) =>
   reply.blocks.map((block) => (block.type === 'text' ? block.text : '')).join('')
 
 /**
+ * 末尾连续的正文块：界面上展示为「回答」的文本段。
+ * 模板提示不是模型正文，出现在末尾时终止这一段。
+ */
+const getAnswerIndexes = (blocks: ReplyBlock[]): number[] => {
+  const indexes: number[] = []
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]
+    if (block.type !== 'text' || block.isTemplate) {
+      break
+    }
+    indexes.unshift(index)
+  }
+  return indexes
+}
+
+/** 思维链：所有思考块的文本，按块顺序用空行连接 */
+const joinThinking = (blocks: ReplyBlock[]): string =>
+  blocks.flatMap((block) => (block.type === 'thinking' ? [block.thinking] : [])).join('\n\n')
+
+/** 正文：末尾正文段的拼接结果，与界面上展示的回答一致 */
+const joinAnswer = (blocks: ReplyBlock[]): string =>
+  getAnswerIndexes(blocks)
+    .map((index) => (blocks[index] as Extract<ReplyBlock, { type: 'text' }>).text)
+    .join('')
+
+export const getReplyThinking = (reply: AssistantMessage): string => joinThinking(reply.blocks)
+
+export const getReplyAnswerText = (reply: AssistantMessage): string => joinAnswer(reply.blocks)
+
+/**
+ * 把用户改写的思维链与正文写回内容块，之后每一轮请求都从这里取内容：
+ * - 思维链写入第一个思考块，其余思考块清空；原本没有思考块且有内容时在最前面新建一个；
+ * - 正文写入末尾正文段的第一个文本块，其余文本块清空；原本没有正文段且有内容时追加一个文本块；
+ * - 正文改动会丢弃引用标记（位置已失效），模板提示、工具块与思考签名保持原样；
+ * - 只有内容确实变化的字段才会重写，避免只改思维链时误清引用。
+ */
+export const rewriteReplyBlocks = (
+  blocks: ReplyBlock[],
+  next: { thinking: string; text: string }
+): ReplyBlock[] => {
+  let result = blocks
+  if (next.thinking !== joinThinking(blocks)) {
+    const indexes = result.flatMap((block, index) => (block.type === 'thinking' ? [index] : []))
+    if (indexes.length === 0) {
+      if (next.thinking.trim()) {
+        result = [{ type: 'thinking', thinking: next.thinking }, ...result]
+      }
+    } else {
+      result = [...result]
+      const [first, ...rest] = indexes
+      const head = result[first]
+      if (head.type === 'thinking') {
+        result[first] = { ...head, thinking: next.thinking }
+      }
+      for (const index of rest) {
+        const block = result[index]
+        if (block.type === 'thinking') {
+          result[index] = { ...block, thinking: '', signature: undefined }
+        }
+      }
+    }
+  }
+  if (next.text !== joinAnswer(blocks)) {
+    const indexes = getAnswerIndexes(result)
+    if (indexes.length > 0) {
+      result = [...result]
+      const [first, ...rest] = indexes
+      const head = result[first]
+      if (head.type === 'text') {
+        result[first] = { ...head, text: next.text, citations: [] }
+      }
+      for (const index of rest) {
+        const block = result[index]
+        if (block.type === 'text') {
+          result[index] = { ...block, text: '', citations: [] }
+        }
+      }
+    } else if (next.text !== '') {
+      result = [...result, { type: 'text', text: next.text }]
+    }
+  }
+  return result
+}
+
+/**
  * 只有正常达到输出上限或被停止的回复可续写，报错回复不能续写。
  * 末条限制由调用方判断，拒绝和客户端工具调用不能续写。
  * 本轮含服务端工具调用或结果（含 READ_LINK 和孤立结果块）的回复不能续写。
@@ -308,12 +393,14 @@ export const toRequestMessages = (
   latestReminder?: string
 ): MessageParam[] => {
   const messages: MessageParam[] = []
-  let previousReminder: string | undefined
+  /**
+   * 每一轮都带上它自己的 latest_reminder。
+   * 文档明确：随历史回传之前各轮的这类消息可以提升上下文缓存命中，
+   * 因此这里不做去重（同一天的多轮会重复日期，但前缀才能完整对齐）。
+   */
   const appendReminder = (reminder: string | undefined) => {
-    // 仅在当前分支首次出现或内容变化时插入快照；缺少快照的消息保持原有内容。
-    if (reminder && reminder !== previousReminder) {
+    if (reminder) {
       messages.push({ role: 'latest_reminder', content: reminder })
-      previousReminder = reminder
     }
   }
   for (const [user, reply] of getContextRounds(history)) {

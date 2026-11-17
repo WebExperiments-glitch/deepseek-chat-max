@@ -70,6 +70,24 @@
   overflow-y: auto;
 }
 
+/* 推理强度下拉：与参数控件同宽，右对齐 */
+.effortSelect {
+  width: 140px;
+}
+
+/* 品牌控件：下拉 + 文字输入 + 复原，窄屏自动换行 */
+.brandControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.brandSelect {
+  width: 140px;
+}
+
 .cell {
   box-sizing: border-box;
   flex-shrink: 0;
@@ -209,6 +227,26 @@
   flex-direction: column;
   gap: 8px;
   padding-bottom: 4px;
+}
+
+/** 服务商与模型配置：与 API Key 区一致的纵向布局 */
+.provider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.providerSelect {
+  align-self: flex-start;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--ds-control-height-m);
 }
 
 .apiKeySaved,

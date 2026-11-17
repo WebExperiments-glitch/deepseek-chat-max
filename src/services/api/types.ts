@@ -4,7 +4,8 @@
  * 声明 deepseek_web_search / deepseek_read_url 或设置 safety_check.level 为 high 时进入扩展模式。
  */
 
-export type ChatModel = 'deepseek-flash' | 'deepseek-v4-pro'
+/** 模型 id 由服务商决定（DeepSeek 与 OpenAI 兼容服务各自一套），不做枚举限制 */
+export type ChatModel = string
 
 // ---------- 响应：内容块 ----------
 
@@ -178,7 +179,18 @@ export type CreateMessageRequest = {
   messages: MessageParam[]
   thinking: { type: 'enabled' | 'disabled' }
   tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
-  safety_check: { level: 'high' }
+  /** 可选：high 开启内容安全审核；不传等于 default 审核（文档：low 或不传不开启额外审核） */
+  safety_check?: { level: 'high' }
+  /** 采样温度 0–2，不传表示使用服务端默认值 */
+  temperature?: number
+  /** 核采样阈值 0.01–1 */
+  top_p?: number
+  /** 输出上限（含思考内容） */
+  max_tokens?: number
+  /** 推理强度：只认 effort；thinking.type 显式设置时优先决定开关，本字段决定强度 */
+  output_config?: { effort: 'low' | 'high' | 'max' }
+  /** DeepSeek 支持 user_id，用于缓存隔离与内容安全隔离 */
+  metadata?: { user_id: string }
   title?: { enabled: boolean }
 }
 
@@ -186,8 +198,23 @@ export type CreateMessageRequest = {
 
 export type StopReason = 'end_turn' | 'max_tokens' | 'tool_use' | 'refusal'
 
-export type StopDetails = { type: 'refusal'; category: null; explanation: null }
+/**
+ * 拒答明细。explanation 在图片未通过审核时会指出具体位置，
+ * 例如 "The following images were blocked by content moderation: messages.1.content.0"。
+ */
+export type StopDetails = {
+  type: 'refusal'
+  category: string | null
+  explanation: string | null
+}
 
+/**
+ * 用量字段，对齐文档的 usage：
+ * - input_tokens 只算未命中缓存的部分，总输入 = input + cache_read + cache_creation；
+ * - output_tokens_details 给出其中的思考 token 与安全审核 token；
+ * - server_tool_use 是工具计数，只有出现时才带该对象。
+ * Anthropic 与 Chat Completions 两套协议的字段名不同，这里统一成一套。
+ */
 export type MessageUsage = {
   /** 未命中缓存的输入 Token */
   input_tokens: number
@@ -195,8 +222,26 @@ export type MessageUsage = {
   cache_read_input_tokens: number
   /** message_start 中为 0，message_delta 中为全轮累计值 */
   output_tokens: number
-  /** 仅当 message_delta 中有对外输出的搜索结果块时出现 */
-  server_tool_use?: { web_search_requests: number; tool_search: number }
+  /** output_tokens 的明细：思考与安全审核已经包含在 output_tokens 里 */
+  output_tokens_details?: {
+    thinking_tokens?: number
+    safety_tokens?: number
+  }
+  /** 服务端页面的计费档位，目前恒为 standard */
+  service_tier?: string
+  /** 联网工具计数；没有任何工具用量时省略整个对象 */
+  server_tool_use?: {
+    /** 尝试发起的搜索次数（含失败与超限） */
+    web_search_requests?: number
+    /** 成功返回结果的搜索次数（计费依据） */
+    tool_search?: number
+    /** 响应中的抓取结果块数量（含错误块） */
+    web_fetch_requests?: number
+    /** 计费的网页抓取次数 */
+    tool_fetch?: number
+    /** 计费的图片搜索次数 */
+    tool_image_search?: number
+  }
 }
 
 /** content_block_start 携带的初始内容块；工具块已是完整内容 */

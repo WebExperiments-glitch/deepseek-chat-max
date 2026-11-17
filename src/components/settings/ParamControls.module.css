@@ -1,0 +1,117 @@
+/* 自定义系统提示词：整块占满一行，标签在上、多行输入在下 */
+.promptCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+}
+
+.promptLabel {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.promptDescription {
+  margin: 0;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.promptArea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+
+  &:focus-visible {
+    border-color: var(--dsw-alias-brand-primary);
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--dsw-alias-label-tertiary);
+  }
+}
+
+.textInput {
+  box-sizing: border-box;
+  width: 180px;
+  padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+
+  &:focus-visible {
+    border-color: var(--dsw-alias-brand-primary);
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--dsw-alias-label-tertiary);
+  }
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--dsw-alias-button-primary-fill);
+  cursor: pointer;
+}
+
+/* 数值参数：右侧一行的滑块 + 数字输入框，窄屏时换到标签下一行 */
+.cell {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.range {
+  width: 150px;
+  accent-color: var(--dsw-alias-button-primary-fill);
+  cursor: pointer;
+}
+
+.number {
+  box-sizing: border-box;
+  width: 76px;
+  padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+
+  &:focus-visible {
+    border-color: var(--dsw-alias-brand-primary);
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--dsw-alias-label-tertiary);
+  }
+}

@@ -1,3 +1,11 @@
+/* 拒答时的图片拦截说明：灰色小字，不抢正文位置 */
+.refusalDetail {
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .message {
   position: relative;
 

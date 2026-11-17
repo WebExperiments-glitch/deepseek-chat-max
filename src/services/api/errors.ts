@@ -10,7 +10,11 @@ export type ApiErrorCondition =
   | 'tooLarge'
   | 'rateLimited'
   | 'serverBusy'
+  /** 400 / 422：请求体或参数不合法（选中了模型不支持的字段、工具类型写错等） */
+  | 'invalidRequest'
   | 'network'
+  /** 服务可达但浏览器被 CORS 拦下，与网络不通区分开 */
+  | 'cors'
   | 'other'
 
 /** 按 HTTP 状态码归类；没有状态码（请求没到达服务端）时按网络问题处理 */
@@ -27,7 +31,11 @@ export const classifyStatus = (status: number | undefined): ApiErrorCondition =>
   if (status === 429) {
     return 'rateLimited'
   }
-  if ((status ?? 0) >= 500) {
+  if (status === 400 || status === 422) {
+    return 'invalidRequest'
+  }
+  // 408 / 504 是网关或服务端超时，重试有意义；其它 5xx 同样按繁忙处理
+  if ((status ?? 0) >= 500 || status === 408) {
     return 'serverBusy'
   }
   return 'other'
@@ -36,6 +44,9 @@ export const classifyStatus = (status: number | undefined): ApiErrorCondition =>
 export const classifyApiError = (error: unknown): ApiErrorCondition => {
   if (!(error instanceof ApiError)) {
     return 'other'
+  }
+  if (error.kind === 'cors') {
+    return 'cors'
   }
   if (error.status === undefined) {
     return error.kind === 'network' ? 'network' : 'other'

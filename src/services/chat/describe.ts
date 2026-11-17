@@ -31,6 +31,9 @@ export const describeReply = (reply: AssistantMessage): Notice | null => {
     if (kind === 'network') {
       return { text: translate('commonNetworkErrorToast') }
     }
+    if (kind === 'cors') {
+      return { text: translate('replyCorsBlocked') }
+    }
     switch (classifyStatus(status)) {
       case 'unauthorized':
         return { text: translate('replyInvalidApiKey'), action: 'apiKey' }
@@ -40,6 +43,9 @@ export const describeReply = (reply: AssistantMessage): Notice | null => {
         return { text: translate('replyRateLimited') }
       case 'serverBusy':
         return { text: translate('completionServerBusyToast') }
+      case 'invalidRequest':
+        // 服务端的报错原文能指出具体字段（例如工具类型不支持），优先保留它
+        return { text: message || translate('replyInvalidRequest') }
       default:
         return message ? { text: message } : null
     }

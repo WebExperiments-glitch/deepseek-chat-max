@@ -7,8 +7,9 @@ import {
   IconStopFill16,
   IconThinkOutline14,
 } from '../base/icons.js'
-import { setSearch, setThinking, useSettings } from '../../services/settings.js'
+import { getDeepseekApiKey, setSearch, setThinking, useSettings } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
+import { useModels } from '../../services/models.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
   addDraftFiles,
@@ -21,9 +22,9 @@ import {
   useDrafts,
 } from '../../services/chat/drafts.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
-import { IconButton } from '../base/IconButton.js'
 import { Tooltip } from '../base/Tooltip.js'
-import { ensureApiKey } from '../settings/settingsDialogState.js'
+import { IconButton } from '../base/IconButton.js'
+import { ensureApiKey, requireDeepseekKey } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
@@ -31,7 +32,10 @@ import { DraftAttachments } from './DraftAttachments.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
+import { ContextRing } from './ContextRing.js'
+import { openStatsDialog } from '../stats/statsDialogState.js'
 import { useTranslate } from '../../i18n/index.js'
+import { supportsDeepseekFeatures } from '../../services/api/providers.js'
 import styles from './ChatInput.module.css'
 
 /** 输入框：自适应高度的文本框 + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
@@ -53,6 +57,24 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
+  const providerId = useSettings((state) => state.provider)
+  const currentApiKey = useSettings((state) => state.apiKeys[state.provider])
+  const deepseekKey = useSettings((state) => state.apiKeys.deepseek)
+  /** 联网搜索、附件、语音与朗读只对 DeepSeek 服务商开放 */
+  const deepseekProvider = supportsDeepseekFeatures(providerId)
+  const modelId = useSettings((state) => state.models[state.provider]) ?? ''
+  const listed = useModels((state) => state.lists[providerId].find((option) => option.id === modelId))
+  /** 模型清单声明了输入模态且明确不含 image 时，提前提示：服务端会把图片换成占位文本 */
+  const modelRejectsImages =
+    listed?.inputModalities !== undefined && !listed.inputModalities.includes('image')
+  /** 附件与语音固定走 DeepSeek，仅 DeepSeek 服务商下可用 */
+  const deepseekReady = deepseekProvider && !!deepseekKey
+  /** 联网搜索：DeepSeek 用服务端工具，其他服务商不开放 */
+  // Responses 协议下服务端工具块无法原样回传，暂时不开放联网搜索
+  const responsesProtocol = useSettings((state) => state.deepseekProtocol === 'responses')
+  const searchReady = deepseekProvider && !!currentApiKey && !responsesProtocol
+  /** DeepSeek 专属能力被服务商限制时的统一提示 */
+  const deepseekFeatureUnavailable = t('chatInputNeedsDeepseekProvider')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
@@ -75,21 +97,33 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   }, [t])
 
   const acceptFiles = (files: File[]) => {
-    if (files.length === 0 || useChatStore.getState().importingHistory || !ensureApiKey()) {
+    if (files.length === 0 || useChatStore.getState().importingHistory) {
       return
     }
-    const error = addDraftFiles(sessionId, files, useSettings.getState().apiKey ?? '')
+    if (!deepseekProvider) {
+      showToast('chatInputNeedsDeepseekProvider')
+      return
+    }
+    if (!requireDeepseekKey()) {
+      return
+    }
+    // 附件上传固定走 DeepSeek 的 Files API
+    const error = addDraftFiles(sessionId, files, getDeepseekApiKey())
     if (error) {
       showToast(error)
     }
   }
   const retryFile = useCallback(
     (id: string) => {
-      if (!useChatStore.getState().importingHistory && ensureApiKey()) {
-        retryDraftAttachment(sessionId, id, useSettings.getState().apiKey ?? '')
+      if (
+        deepseekProvider &&
+        !useChatStore.getState().importingHistory &&
+        requireDeepseekKey()
+      ) {
+        retryDraftAttachment(sessionId, id, getDeepseekApiKey())
       }
     },
-    [sessionId]
+    [deepseekProvider, sessionId]
   )
   const removeFile = useCallback(
     (id: string) => {
@@ -133,14 +167,17 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const canSend = !importingHistory && !streaming && voice.status === 'idle' && draftReady
 
   const send = () => {
-    if (
-      useChatStore.getState().importingHistory ||
-      voice.status !== 'idle' ||
-      !prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)
-    ) {
+    if (useChatStore.getState().importingHistory || voice.status !== 'idle') {
+      return
+    }
+    if (!prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)) {
       return
     }
     // 文本与上传完成态由提交动作读取最新快照，不使用上一次渲染的草稿。
+    const currentDraft = getDraft(sessionId)
+    if (modelRejectsImages && currentDraft.attachments.some((item) => item.isImage)) {
+      showToast({ key: 'modelNoImageSupport' })
+    }
     if (!ensureApiKey() || !sendMessage(sessionId)) {
       return
     }
@@ -200,7 +237,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         </div>
       </div>
       <div className={styles.functionRow}>
-        {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
+        {/* 深度思考 / 智能搜索，tooltip 在按钮上方 */}
         <div ref={togglesRef} className={styles.toggles}>
           <Tooltip content={t('deactivatedThinkTooltip')}>
             <button
@@ -214,13 +251,28 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               <span className={styles.toggleLabel}>{t('thinkingSwitch')}</span>
             </button>
           </Tooltip>
-          <Tooltip content={t('deactivatedSearchTooltip')}>
+          <Tooltip
+            content={t(
+              !deepseekProvider
+                ? 'chatInputNeedsDeepseekProvider'
+                : responsesProtocol
+                  ? 'chatInputSearchUnsupportedResponses'
+                  : searchReady
+                    ? 'deactivatedSearchTooltip'
+                    : 'chatInputSearchNeedsDeepseekKey'
+            )}
+          >
             <button
               type="button"
-              className={clsx(styles.toggle, search && styles.selected)}
+              className={clsx(styles.toggle, search && searchReady && styles.selected)}
               aria-label={t('search')}
-              aria-pressed={search}
-              onClick={() => setSearch(!search)}
+              aria-pressed={search && searchReady}
+              disabled={!searchReady}
+              onClick={() => {
+                if (searchReady) {
+                  setSearch(!search)
+                }
+              }}
             >
               <IconGlobeLanguageOutline14 />
               <span className={styles.toggleLabel}>{t('search')}</span>
@@ -228,14 +280,21 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           </Tooltip>
         </div>
         <div className={styles.right}>
+          {/* 上下文圆环：点击打开会话统计；欢迎页没有会话时不响应点击 */}
+          <ContextRing
+            sessionId={sessionId}
+            streaming={streaming}
+            onOpen={sessionId === null ? undefined : () => openStatsDialog(sessionId)}
+          />
           <VoiceButton
             status={voice.status}
-            disabled={!voice.available}
+            disabled={!voice.available || !deepseekReady}
+            disabledReason={!deepseekProvider ? deepseekFeatureUnavailable : undefined}
             seconds={voice.seconds}
             onClick={() => {
               if (
                 voice.status !== 'idle' ||
-                (!useChatStore.getState().importingHistory && ensureApiKey())
+                (!useChatStore.getState().importingHistory && requireDeepseekKey())
               ) {
                 void voice.toggle()
               }
@@ -245,9 +304,15 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             size="m"
             tone="primary"
             icon={<IconPaperclipOutline16 />}
-            tooltip={t('uploadFile')}
-            disabled={importingHistory}
-            onClick={() => ensureApiKey() && fileInputRef.current?.click()}
+            tooltip={t(
+              !deepseekProvider
+                ? 'chatInputNeedsDeepseekProvider'
+                : deepseekReady
+                  ? 'uploadFile'
+                  : 'chatInputAttachmentNeedsDeepseekKey'
+            )}
+            disabled={importingHistory || !deepseekReady}
+            onClick={() => requireDeepseekKey() && fileInputRef.current?.click()}
           />
           <input
             ref={fileInputRef}

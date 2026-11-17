@@ -1,54 +1,112 @@
 import { create } from 'zustand'
 import type { TtsVoice } from './api/speech.js'
-import { normalizeLocation, type UserLocation } from './location.js'
+import {
+  isProviderId,
+  PROVIDERS,
+  PROVIDER_IDS,
+  supportsDeepseekFeatures,
+  type ProviderId,
+} from './api/providers.js'
+import { currentTimeZoneLocation, normalizeLocation, type UserLocation } from './location.js'
+import type { ImageDetail } from './api/toOpenAi.js'
+import { readStorage, writeStorage } from './platform/storage.js'
 
 export type Locale = 'zh-CN' | 'en-US'
 
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
+/** 推理强度：对齐文档 output_config.effort 的 low / high / max 三档 */
+export type EffortLevel = 'low' | 'high' | 'max'
+
+export const EFFORT_LEVELS: EffortLevel[] = ['low', 'high', 'max']
+
+/** 各服务商的 API Key；没有配置时为 null */
+export type ProviderApiKeys = Record<ProviderId, string | null>
+
+/** 各服务商选中的模型；没有选择过时为 null，按服务商默认模型发请求 */
+export type ProviderModels = Record<ProviderId, string | null>
+
+/** 本机设置，存 localStorage：服务商与各自的 Key、模型、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
-  apiKey: string | null
+  /** 当前用于对话的服务商 */
+  provider: ProviderId
+  /** 各服务商的 Key；DeepSeek 的 Key 同时用于附件、语音和联网检索 */
+  apiKeys: ProviderApiKeys
+  /** 各服务商当前选中的模型 */
+  models: ProviderModels
   locale: Locale
   themePreference: ThemePreference
   location: UserLocation | null
   ttsVoice: TtsVoice
   thinking: boolean
   search: boolean
+  /** 采样温度 0–2；思考模式下服务端自行处理 */
+  temperature: number
+  /** 核采样阈值 0.01–1 */
+  topP: number
+  /** 每次回复的最大输出 Token；null 表示使用服务端默认值 */
+  maxTokens: number | null
+  /** DeepSeek 的 API 协议：Messages（默认）或 Responses */
+  deepseekProtocol: 'messages' | 'responses'
+  /** 推理强度；null 表示使用服务端默认（high） */
+  effort: EffortLevel | null
+  /** 图片细节级别：low 更快更省 token，其余保留原图 */
+  imageDetail: ImageDetail
+  /** 拒答时是否展示服务端给出的图片拦截说明 */
+  showRefusalDetail: boolean
+  /** 可选的 user_id：用于 KVCache 隔离、内容安全与调度隔离；空串表示不传 */
+  userId: string
+  /** 自定义系统提示词；空串表示使用官方身份说明 */
+  customSystemPrompt: string
+  /** 上下文压力达到阈值时自动压缩较早轮次 */
+  autoCompress: boolean
+  /** 本地长期记忆（全局，跨会话） */
+  memoryEnabled: boolean
+  /** 是否开启安全审核（safety_check） */
+  safetyCheck: boolean
+  /** 是否把当前时间写进请求上下文 */
+  timeContext: boolean
+  /** 左上角品牌标识：DeepSeek Logo 或自定义文字 */
+  brandMode: 'logo' | 'text'
+  /** 自定义品牌文字；空串回落到默认应用名 */
+  brandText: string
   siderCollapsed: boolean
 }
 
 const KEYS = {
-  apiKey: 'chat-demo:api-key',
+  /** 旧版本只存一个 DeepSeek Key，读取时迁移到 apiKeys.deepseek */
+  legacyApiKey: 'chat-demo:api-key',
+  provider: 'chat-demo:provider',
+  apiKeys: 'chat-demo:api-keys',
+  models: 'chat-demo:models',
   locale: 'chat-demo:locale',
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
+  temperature: 'chat-demo:temperature',
+  topP: 'chat-demo:top-p',
+  maxTokens: 'chat-demo:max-tokens',
+  deepseekProtocol: 'chat-demo:deepseek-protocol',
+  effort: 'chat-demo:effort',
+  userId: 'chat-demo:user-id',
+  imageDetail: 'chat-demo:image-detail',
+  showRefusalDetail: 'chat-demo:show-refusal-detail',
+  customSystemPrompt: 'chat-demo:custom-system-prompt',
+  autoCompress: 'chat-demo:auto-compress',
+  memoryEnabled: 'chat-demo:memory-enabled',
+  safetyCheck: 'chat-demo:safety-check',
+  timeContext: 'chat-demo:time-context',
+  brandMode: 'chat-demo:brand-mode',
+  brandText: 'chat-demo:brand-text',
   siderCollapsed: 'chat-demo:sider-collapsed',
 } as const
 
-const read = (key: string) => {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
+const read = readStorage
 
-const write = (key: string, value: string | null) => {
-  try {
-    if (value === null) {
-      localStorage.removeItem(key)
-    } else {
-      localStorage.setItem(key, value)
-    }
-  } catch {
-    // 存储不可用时只在内存中生效
-  }
-}
+const write = writeStorage
 
 /** 位置选择模式跟随浏览器语言，与应用内选择的界面语言无关。 */
 export const isChineseBrowser = (): boolean =>
@@ -66,7 +124,12 @@ const initialLocation = (): UserLocation | null => {
   try {
     const location = normalizeLocation(JSON.parse(read(KEYS.location) ?? 'null'))
     if (!location) {
-      return null
+      // 没保存过位置：按浏览器时区推断一次并记住，latest_reminder 才不会缺地区
+      const inferred = currentTimeZoneLocation()
+      if (inferred) {
+        write(KEYS.location, JSON.stringify(inferred))
+      }
+      return inferred
     }
     return isChineseBrowser()
       ? location.region === 'CN' && location.province
@@ -87,16 +150,141 @@ const initialThemePreference = (): ThemePreference => {
 /** 未保存过时使用服务端默认音色 stella（海星） */
 const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide' : 'stella')
 
+const emptyApiKeys = (): ProviderApiKeys =>
+  Object.fromEntries(PROVIDER_IDS.map((id) => [id, null])) as ProviderApiKeys
+
+const emptyModels = (): ProviderModels =>
+  Object.fromEntries(PROVIDER_IDS.map((id) => [id, null])) as ProviderModels
+
+/** 读 JSON 对象；解析失败按空对象处理，不抛出 */
+const readRecord = (key: string): Record<string, unknown> => {
+  const raw = read(key)
+  if (!raw) {
+    return {}
+  }
+  try {
+    const value: unknown = JSON.parse(raw)
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 合并已保存的 Key；旧版本的单个 Key 迁移到 deepseek，迁移后删除旧条目 */
+const initialApiKeys = (): ProviderApiKeys => {
+  const apiKeys = emptyApiKeys()
+  for (const [id, value] of Object.entries(readRecord(KEYS.apiKeys))) {
+    if (isProviderId(id) && typeof value === 'string' && value) {
+      apiKeys[id] = value
+    }
+  }
+  if (!apiKeys.deepseek) {
+    const legacy = read(KEYS.legacyApiKey)
+    if (legacy) {
+      apiKeys.deepseek = legacy
+      write(KEYS.apiKeys, JSON.stringify(apiKeys))
+      write(KEYS.legacyApiKey, null)
+    }
+  }
+  return apiKeys
+}
+
+const initialModels = (): ProviderModels => {
+  const models = emptyModels()
+  for (const [id, value] of Object.entries(readRecord(KEYS.models))) {
+    if (isProviderId(id) && typeof value === 'string' && value) {
+      models[id] = value
+    }
+  }
+  return models
+}
+
+/** 未保存过时使用服务端默认强度（high），只有显式选择才带上 output_config */
+const initialEffort = (): EffortLevel | null => {
+  const saved = read(KEYS.effort)
+  return saved === 'low' || saved === 'high' || saved === 'max' ? saved : null
+}
+
+/** 未保存过时使用 DeepSeek */
+/** 默认 auto，与服务端默认行为一致；必须在 useSettings 之前定义，否则是 TDZ 错误 */
+const initialImageDetail = (): ImageDetail => {
+  const saved = read(KEYS.imageDetail)
+  return saved === 'low' || saved === 'high' ? saved : 'auto'
+}
+
+const initialProvider = (): ProviderId => {
+  const saved = read(KEYS.provider)
+  return isProviderId(saved) ? saved : 'deepseek'
+}
+
+/** 读数值设置：缺失或非法时用默认值，并夹在区间内 */
+const initialNumber = (key: string, fallback: number, min: number, max: number): number => {
+  const raw = read(key)
+  if (raw === null) {
+    return fallback
+  }
+  const value = Number(raw)
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+}
+
+/** 读可留空的数值设置：缺失、非法或非正数时为 null，表示使用服务端默认值 */
+const initialOptionalNumber = (key: string, min: number, max: number): number | null => {
+  const raw = read(key)
+  if (raw === null) {
+    return null
+  }
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < min) {
+    return null
+  }
+  return Math.min(max, Math.round(value))
+}
+
 export const useSettings = create<Settings>(() => ({
-  apiKey: read(KEYS.apiKey),
+  provider: initialProvider(),
+  apiKeys: initialApiKeys(),
+  models: initialModels(),
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
   thinking: read(KEYS.thinking) === 'true',
   search: read(KEYS.search) === 'true',
+  temperature: initialNumber(KEYS.temperature, 1, 0, 2),
+  topP: initialNumber(KEYS.topP, 1, 0.01, 1),
+  maxTokens: initialOptionalNumber(KEYS.maxTokens, 1, 65536),
+  deepseekProtocol: read(KEYS.deepseekProtocol) === 'responses' ? 'responses' : 'messages',
+  effort: initialEffort(),
+  userId: read(KEYS.userId) ?? '',
+  imageDetail: initialImageDetail(),
+  showRefusalDetail: read(KEYS.showRefusalDetail) !== 'false',
+  customSystemPrompt: read(KEYS.customSystemPrompt) ?? '',
+  // 默认开启：窗口较大的模型很少触发，窗口小的模型才是真正需要它的场景
+  autoCompress: read(KEYS.autoCompress) !== 'false',
+  memoryEnabled: read(KEYS.memoryEnabled) !== 'false',
+  safetyCheck: read(KEYS.safetyCheck) !== 'false',
+  timeContext: read(KEYS.timeContext) !== 'false',
+  brandMode: read(KEYS.brandMode) === 'text' ? 'text' : 'logo',
+  brandText: read(KEYS.brandText) ?? '',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
 }))
+
+/** 当前服务商的 Key；没有配置时为空串，调用方按空串处理 */
+export const getCurrentApiKey = (): string => {
+  const { provider, apiKeys } = useSettings.getState()
+  return apiKeys[provider] ?? ''
+}
+
+/** DeepSeek 的 Key：附件、语音、联网检索都只认这一份 */
+export const getDeepseekApiKey = (): string => useSettings.getState().apiKeys.deepseek ?? ''
+
+/** 当前服务商实际使用的模型：用户选择过就用选择，否则用默认模型 */
+export const getCurrentModel = (): string => {
+  const { provider, models } = useSettings.getState()
+  return models[provider] || PROVIDERS[provider].defaultModel
+}
 
 export const setLocale = (locale: Locale) => {
   write(KEYS.locale, locale)
@@ -119,10 +307,32 @@ export const setTtsVoice = (ttsVoice: TtsVoice) => {
   useSettings.setState({ ttsVoice })
 }
 
-export const setApiKey = (apiKey: string | null) => {
-  write(KEYS.apiKey, apiKey)
-  useSettings.setState({ apiKey })
+/** 切换对话服务商；各家的 Key 与模型互相独立，切回时沿用上次的选择 */
+export const setProvider = (provider: ProviderId) => {
+  write(KEYS.provider, provider)
+  // 联网搜索只属于 DeepSeek，切到其他服务商时关掉，避免后台继续按旧开关发请求
+  const resetSearch = !supportsDeepseekFeatures(provider) && useSettings.getState().search
+  if (resetSearch) {
+    write(KEYS.search, 'false')
+  }
+  useSettings.setState({ provider, ...(resetSearch ? { search: false } : {}) })
 }
+
+export const setProviderApiKey = (provider: ProviderId, apiKey: string | null) => {
+  const apiKeys = { ...useSettings.getState().apiKeys, [provider]: apiKey }
+  write(KEYS.apiKeys, JSON.stringify(apiKeys))
+  useSettings.setState({ apiKeys })
+}
+
+export const setProviderModel = (provider: ProviderId, model: string | null) => {
+  const models = { ...useSettings.getState().models, [provider]: model }
+  write(KEYS.models, JSON.stringify(models))
+  useSettings.setState({ models })
+}
+
+/** 兼容旧调用：写入当前服务商的 Key */
+export const setApiKey = (apiKey: string | null) =>
+  setProviderApiKey(useSettings.getState().provider, apiKey)
 
 export const setThinking = (thinking: boolean) => {
   write(KEYS.thinking, String(thinking))
@@ -132,6 +342,89 @@ export const setThinking = (thinking: boolean) => {
 export const setSearch = (search: boolean) => {
   write(KEYS.search, String(search))
   useSettings.setState({ search })
+}
+
+export const setTemperature = (temperature: number) => {
+  write(KEYS.temperature, String(temperature))
+  useSettings.setState({ temperature })
+}
+
+export const setTopP = (topP: number) => {
+  write(KEYS.topP, String(topP))
+  useSettings.setState({ topP })
+}
+
+/** null 表示回到服务端默认值，此时删除本地条目而不是存 'null' */
+export const setMaxTokens = (maxTokens: number | null) => {
+  write(KEYS.maxTokens, maxTokens === null ? null : String(maxTokens))
+  useSettings.setState({ maxTokens })
+}
+
+export const setShowRefusalDetail = (showRefusalDetail: boolean) => {
+  write(KEYS.showRefusalDetail, String(showRefusalDetail))
+  useSettings.setState({ showRefusalDetail })
+}
+
+export const setImageDetail = (imageDetail: ImageDetail) => {
+  write(KEYS.imageDetail, imageDetail)
+  useSettings.setState({ imageDetail })
+}
+
+export const setUserId = (userId: string) => {
+  write(KEYS.userId, userId === '' ? null : userId)
+  useSettings.setState({ userId })
+}
+
+export const setDeepseekProtocol = (deepseekProtocol: 'messages' | 'responses') => {
+  write(KEYS.deepseekProtocol, deepseekProtocol)
+  useSettings.setState({ deepseekProtocol })
+}
+
+export const setEffort = (effort: EffortLevel | null) => {
+  write(KEYS.effort, effort)
+  useSettings.setState({ effort })
+}
+
+export const setCustomSystemPrompt = (customSystemPrompt: string) => {
+  write(KEYS.customSystemPrompt, customSystemPrompt === '' ? null : customSystemPrompt)
+  useSettings.setState({ customSystemPrompt })
+}
+
+export const setAutoCompress = (autoCompress: boolean) => {
+  write(KEYS.autoCompress, String(autoCompress))
+  useSettings.setState({ autoCompress })
+}
+
+export const setBrandMode = (brandMode: 'logo' | 'text') => {
+  write(KEYS.brandMode, brandMode)
+  useSettings.setState({ brandMode })
+}
+
+export const setBrandText = (brandText: string) => {
+  write(KEYS.brandText, brandText === '' ? null : brandText)
+  useSettings.setState({ brandText })
+}
+
+/** 恢复默认：DeepSeek Logo + 空的自定义文字 */
+export const resetBrand = () => {
+  write(KEYS.brandMode, null)
+  write(KEYS.brandText, null)
+  useSettings.setState({ brandMode: 'logo', brandText: '' })
+}
+
+export const setSafetyCheck = (safetyCheck: boolean) => {
+  write(KEYS.safetyCheck, String(safetyCheck))
+  useSettings.setState({ safetyCheck })
+}
+
+export const setTimeContext = (timeContext: boolean) => {
+  write(KEYS.timeContext, String(timeContext))
+  useSettings.setState({ timeContext })
+}
+
+export const setMemoryEnabled = (memoryEnabled: boolean) => {
+  write(KEYS.memoryEnabled, String(memoryEnabled))
+  useSettings.setState({ memoryEnabled })
 }
 
 export const setSiderCollapsed = (siderCollapsed: boolean) => {

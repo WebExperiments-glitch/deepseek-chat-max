@@ -1,10 +1,42 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
-import { ApiError, streamMessage } from '../api/client.js'
-import type { ChatModel, CreateMessageRequest } from '../api/types.js'
+import { ApiError, streamMessage, streamOpenAiChat } from '../api/client.js'
+import { DEEPSEEK_ORIGIN, getProvider, supportsDeepseekFeatures } from '../api/providers.js'
+import { streamResponses, toResponsesInput } from '../api/responses.js'
+import type {
+  CreateMessageRequest,
+  MessageParam,
+  MessageStreamEvent,
+} from '../api/types.js'
+import { replyPrefixText, toOpenAiMessages, type InlineAttachment } from '../api/toOpenAi.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
-import { useSettings } from '../settings.js'
+import {
+  getCurrentApiKey,
+  getCurrentModel,
+  getDeepseekApiKey,
+  useSettings,
+} from '../settings.js'
+import { describeSkippedNames, inlineAttachments, notifyInlineNotice } from './inlineAttachments.js'
+import {
+  clearAllContextUsage,
+  findContextWindow,
+  forgetContextUsage,
+  noteContextUsage,
+  resolveContextWindow,
+  useContextUsage,
+} from './usageStats.js'
+import { useModels } from '../models.js'
+import {
+  applyCompression,
+  autoCompressNeeded,
+  compressSession,
+  compressionSummarySection,
+  type CompressOutcome,
+} from './compression.js'
+import { composeSystemPrompt } from './systemPrompt.js'
+import { formatTimeContext } from './timeContext.js'
+import { extractRoundMemory, memoryBlockForQuery } from '../memory/store.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -19,6 +51,9 @@ import {
   applyEvent,
   canContinueReply,
   getContextRounds,
+  getReplyAnswerText,
+  getReplyThinking,
+  rewriteReplyBlocks,
   settleReply,
   toRequestMessages,
 } from './reply.js'
@@ -32,10 +67,8 @@ import {
   type UserMessage,
 } from './types.js'
 
-/** deepseek-flash 同时支持深度思考与图片输入 */
-const MODEL: ChatModel = 'deepseek-flash'
-/** 所有生成请求统一携带的助手身份说明 */
-const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
+/** 未设置最大输出时，给压缩阈值预留的输出量（保守值，宁早压缩不晚压缩） */
+const DEFAULT_OUTPUT_RESERVE = 8192
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
 /** 安全审核固定开启，所有请求都走扩展模式 */
@@ -260,7 +293,8 @@ const createReply = (): AssistantMessage => {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
-    model: MODEL,
+    // 记录创建时的模型：会话切到另一家服务商后，重新生成仍沿用本轮的选择
+    model: getCurrentModel(),
     thinking,
     search,
     prefix: true,
@@ -409,6 +443,8 @@ export const replaceHistory = async (write: () => Promise<void>): Promise<number
     try {
       await write()
       summaries = await db.commitStaging()
+      // 历史被整体替换，旧会话的上下文用量随之作废
+      clearAllContextUsage()
     } catch (error) {
       await db.clearStaging().catch(db.reportStorageError('clear unfinished history replacement'))
       throw error
@@ -501,6 +537,8 @@ const removeSessionData = async (id: string): Promise<boolean> => {
       return false
     }
     await db.deleteSession(id)
+    // 会话已从本地删除，上下文用量也不再保留
+    forgetContextUsage(id)
     if (epoch !== historyEpoch) {
       return true
     }
@@ -674,6 +712,69 @@ export const editMessage = (sessionId: string, messageId: string, content: strin
   return true
 }
 
+/**
+ * 改写一条已结束回复的正文或思维链：直接写回内容块，不新建分支，
+ * 之后每一轮请求都从这里取内容；首次改写时保存原始块快照，供「还原原文」使用。
+ */
+export const editReplyContent = (
+  sessionId: string,
+  messageId: string,
+  next: { thinking: string; text: string }
+): boolean => {
+  if (get().importingHistory || deletingSessions.has(sessionId) || getStreamController(sessionId)) {
+    return false
+  }
+  const session = getSession(sessionId)
+  const message = session?.messages.find((item) => item.id === messageId)
+  if (!session || !message || message.role !== 'assistant') {
+    return false
+  }
+  // 内容没有变化就当作保存成功，不写入快照，避免凭空产生「已编辑」状态。
+  if (next.thinking === getReplyThinking(message) && next.text === getReplyAnswerText(message)) {
+    return true
+  }
+  const at = Date.now()
+  const blocks = rewriteReplyBlocks(message.blocks, next)
+  updateSession(sessionId, (state) => ({
+    ...state,
+    updatedAt: at,
+    messages: state.messages.map((item) =>
+      item.id === messageId && item.role === 'assistant'
+        ? { ...item, blocks, edited: item.edited ?? { at, blocks: item.blocks } }
+        : item
+    ),
+  }))
+  persist(sessionId)
+  return true
+}
+
+/** 还原为模型原始回复：恢复到首次改写前保存的块快照 */
+export const revertReplyContent = (sessionId: string, messageId: string): boolean => {
+  if (get().importingHistory || deletingSessions.has(sessionId) || getStreamController(sessionId)) {
+    return false
+  }
+  const session = getSession(sessionId)
+  const message = session?.messages.find((item) => item.id === messageId)
+  if (!session || !message || message.role !== 'assistant') {
+    return false
+  }
+  const original = message.edited
+  if (!original) {
+    return false
+  }
+  updateSession(sessionId, (state) => ({
+    ...state,
+    updatedAt: Date.now(),
+    messages: state.messages.map((item) =>
+      item.id === messageId && item.role === 'assistant'
+        ? { ...item, blocks: original.blocks, edited: undefined }
+        : item
+    ),
+  }))
+  persist(sessionId)
+  return true
+}
+
 export const selectMessageVersion = (sessionId: string, messageId: string) => {
   if (get().importingHistory || deletingSessions.has(sessionId)) {
     return
@@ -709,13 +810,15 @@ export const continueReply = (sessionId: string, messageId: string) => {
   const reply: AssistantMessage = {
     ...previous,
     // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? MODEL,
+    model: previous.model ?? getCurrentModel(),
     thinking: previous.thinking ?? thinking,
     search: previous.search ?? search,
     status: 'pending',
     stopReason: undefined,
     stopDetails: undefined,
     error: undefined,
+    // 续写会在当前块之后追加内容，旧的原文快照已对不上。
+    edited: undefined,
   }
   updateReply(sessionId, reply)
   updateSession(sessionId, (s) => ({ ...s, updatedAt: Date.now() }))
@@ -818,7 +921,8 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
   // 服务端判定 file_id 失效时会清掉会话里的 serverId，先用最新消息替换请求快照，
   // 否则快照里仍是旧 id，补传会直接复用它。
   request = refreshRequest(sessionId, request)
-  const apiKey = useSettings.getState().apiKey ?? ''
+  // 附件上传固定走 DeepSeek 的 Files API，与当前对话服务商无关
+  const apiKey = getDeepseekApiKey()
   const serverIds = new Map<string, string>()
   // 停止生成立即生效；上传本身不取消（输入框与其他消息可能共用同一任务），完成后照常写回 serverId
   const aborted = new Promise<never>((_, reject) => {
@@ -955,6 +1059,136 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
   })
 
 /**
+ * 非 DeepSeek 服务商的附件：直接读本地原件内联。
+ * 历史轮次里的二进制文档会被跳过，本轮提问中的文档按未进入请求处理。
+ */
+const resolveInlineAttachments = async (
+  prepared: Request,
+  signal: AbortSignal
+): Promise<{ groups: InlineAttachment[][]; skipped: string[] }> => {
+  const groups: InlineAttachment[][] = []
+  const skipped: string[] = []
+  // 图片细节级别来自设置；OCR 固定用 DeepSeek Key（文档解析能力只在那里）
+  const { imageDetail } = useSettings.getState()
+  const ocrKey = getDeepseekApiKey()
+  const inline = async (files: FileAttachment[]): Promise<InlineAttachment[]> => {
+    if (files.length === 0) {
+      return []
+    }
+    signal.throwIfAborted()
+    const result = await inlineAttachments(files, { detail: imageDetail, ocrKey, signal })
+    skipped.push(...result.skipped.map((item) => item.name))
+    return result.inline
+  }
+  for (const [user] of getContextRounds(prepared.history)) {
+    groups.push(await inline(user.files))
+  }
+  groups.push(await inline(prepared.question.files))
+  return { groups, skipped }
+}
+
+/**
+ * 把请求级上下文（摘要 / 记忆 / 当前时间）放到最后一条 user 消息之前。
+ * 只影响本轮尾部 token，历史前缀保持不变，提示词缓存才能继续命中。
+ */
+const prependToLastUser = (messages: MessageParam[], context: string) => {
+  if (context === '') {
+    return
+  }
+  const last = messages.at(-1)
+  if (!last || last.role !== 'user') {
+    return
+  }
+  if (typeof last.content === 'string') {
+    last.content = `${context}\n\n${last.content}`
+  } else {
+    last.content = [{ type: 'text', text: context }, ...last.content]
+  }
+}
+
+/** 无法内联的附件（PDF、Word 等）交给界面层提示，服务层不直接弹 toast */
+const showSkippedAttachments = (names: string[]) => notifyInlineNotice(describeSkippedNames(names))
+
+/**
+ * 压缩较早轮次并把摘要写回会话；手动压缩与自动压缩共用。
+ * 摘要请求固定走 DeepSeek Key，与附件、语音、检索保持一致。
+ */
+export const compressCurrentSession = async (sessionId: string): Promise<CompressOutcome> => {
+  if (get().importingHistory || deletingSessions.has(sessionId) || getStreamController(sessionId)) {
+    return { ok: false, reason: 'busy' }
+  }
+  const session = getSession(sessionId)
+  if (!session) {
+    return { ok: false, reason: 'error' }
+  }
+  const outcome = await compressSession(
+    session,
+    getDeepseekApiKey(),
+    useSettings.getState().locale
+  )
+  if (!outcome.ok) {
+    return outcome
+  }
+  // 压缩期间会话可能被删除或开始新的生成，此时丢弃结果，避免覆盖更新后的历史
+  if (!getSession(sessionId) || getStreamController(sessionId)) {
+    return { ok: false, reason: 'busy' }
+  }
+  updateSession(sessionId, (state) => ({ ...state, compression: outcome.compression }))
+  persist(sessionId)
+  return outcome
+}
+
+/**
+ * 回复结束后判断是否需要自动压缩：只认服务端上报的用量与已知窗口，
+ * 窗口未知时不猜、不压缩，把决定权留给用户。
+ */
+const autoCompressAfterReply = async (sessionId: string) => {
+  const settings = useSettings.getState()
+  if (!settings.autoCompress || !getDeepseekApiKey()) {
+    return
+  }
+  if (getStreamController(sessionId) || get().importingHistory) {
+    return
+  }
+  const session = getSession(sessionId)
+  const usage = useContextUsage.getState().byId[sessionId]
+  if (!session || !usage) {
+    return
+  }
+  // 按实际发请求的模型解释上下文窗口；切换模型后不拿新模型的口径套旧用量
+  const model = usage.model ?? (settings.models[settings.provider] || getCurrentModel())
+  const listed = findContextWindow(useModels.getState().lists, model)
+  const window = resolveContextWindow(model, listed ?? undefined)
+  if (window === null) {
+    return
+  }
+  const needed = autoCompressNeeded(session, {
+    tokens: usage.tokens,
+    window,
+    maxOutputTokens: settings.maxTokens ?? DEFAULT_OUTPUT_RESERVE,
+  })
+  if (needed) {
+    await compressCurrentSession(sessionId)
+  }
+}
+
+/**
+ * OpenAI 兼容服务没有服务端标题生成，用本地截取的首句作为会话标题。
+ * 与 DeepSeek 一致：已有标题时不覆盖。
+ */
+const applyLocalTitle = (sessionId: string, controller: AbortController, question: string) => {
+  if (!titleRequests.has(controller)) {
+    return
+  }
+  titleRequests.delete(controller)
+  const title = question.replace(/\s+/g, ' ').trim().slice(0, 30)
+  if (!title) {
+    return
+  }
+  updateSession(sessionId, (session) => (session.title ? session : { ...session, title }))
+}
+
+/**
  * 请求并消费流：先补齐附件的 serverId，再发请求；流式增量按动画帧刷新内存，完成、失败或停止后落盘。
  * 补传失败时回复记为 upload 错误，可重试。
  * 服务端判定 file_id 失效时重新补传后重发，退避重试且次数有上限，超过则按原始报错收尾。
@@ -989,26 +1223,124 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         reply = { ...reply, latestReminder }
         updateReply(sessionId, reply)
         persist(sessionId)
+        // 压缩记录存在时：请求里跳过被摘要覆盖的轮次
+        const compression = getSession(sessionId)?.compression
+        const now = useSettings.getState()
+        const locale = now.locale
+        /**
+         * 系统提示词必须保持稳定。
+         * 摘要 / 记忆 / 当前时间都是逐轮变化的内容，一旦塞进 system，
+         * 每轮前缀都不一样，服务端的提示词缓存就永远命不中（实测命中率会掉到 0%）。
+         * 因此这些动态内容统一放到本轮提问的末尾：只改变尾部 token，
+         * 历史前缀完全一致，缓存才能持续命中。
+         */
+        const system = composeSystemPrompt(now.customSystemPrompt)
+        const contextTail = [
+          compressionSummarySection(compression, locale),
+          now.memoryEnabled ? memoryBlockForQuery(prepared.question.content) : '',
+          now.timeContext ? formatTimeContext(locale) : '',
+        ]
+          .filter((part) => part !== '')
+          .join('\n\n')
         const messages = toRequestMessages(
-          prepared.history,
+          applyCompression(prepared.history, compression),
           prepared.question,
           prepared.prefix,
           initial.thinking ?? false,
           latestReminder
         )
-        const events = streamMessage(
-          useSettings.getState().apiKey ?? '',
-          {
-            model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
-            messages,
-            thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
-            safety_check: SAFETY_CHECK,
-            tools: serverTools(initial.search ?? false),
-            ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
-          },
-          controller.signal
-        )
+        prependToLastUser(messages, contextTail)
+        const provider = getProvider(useSettings.getState().provider)
+        const model = initial.model ?? getCurrentModel()
+        // DeepSeek 可以在 Messages 与 Responses 两套协议之间切换；其余服务商固定各自协议
+        const useResponses =
+          provider.protocol === 'anthropic' &&
+          useSettings.getState().provider === 'deepseek' &&
+          useSettings.getState().deepseekProtocol === 'responses'
+        // 采样参数在请求时读取，改设置后立即对下一轮生效
+        const { temperature, topP, maxTokens, effort, userId } = useSettings.getState()
+        // user_id 可选：用于 KVCache 隔离与内容安全隔离，空串时不传
+        const identity = userId.trim() ? { user_id: userId.trim() } : null
+        const sampling = {
+          temperature,
+          top_p: topP,
+          ...(maxTokens === null ? {} : { max_tokens: maxTokens }),
+        }
+        // 推理强度按文档走 output_config.effort；只在开启思考时下发，开关仍由 thinking.type 决定
+        const effortConfig =
+          effort && (initial.thinking ?? false) ? { output_config: { effort } } : {}
+        // 非 DeepSeek 服务商走 OpenAI 兼容协议，只发送对话文本
+        let events: AsyncGenerator<MessageStreamEvent>
+        if (useResponses) {
+          events = streamResponses(
+            DEEPSEEK_ORIGIN,
+            getDeepseekApiKey() || getCurrentApiKey(),
+            {
+              model,
+              stream: true,
+              input: toResponsesInput(messages),
+              instructions: system,
+              ...(maxTokens === null ? {} : { max_output_tokens: maxTokens }),
+              temperature,
+              top_p: topP,
+              ...(effort && (initial.thinking ?? false) ? { reasoning: { effort } } : {}),
+              ...(now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
+              ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
+              ...(userId.trim() ? { user: userId.trim() } : {}),
+            },
+            controller.signal
+          )
+        } else if (provider.protocol === 'openai') {
+          // 联网搜索与附件只对 DeepSeek 开放，其他服务商只发送对话
+          const inline = supportsDeepseekFeatures(provider.id)
+            ? await resolveInlineAttachments(prepared, controller.signal)
+            : {
+                groups: [] as InlineAttachment[][],
+                skipped: prepared.question.files.map((file) => file.name),
+              }
+          if (inline.skipped.length > 0) {
+            // 无法内联的文档不进请求，明确告诉用户，避免误以为模型读到了内容
+            showSkippedAttachments(inline.skipped)
+          }
+          const openaiMessages = toOpenAiMessages(system, messages, inline.groups, {
+            prefixText: prepared.prefix ? replyPrefixText(prepared.prefix.blocks) : '',
+          })
+          events = streamOpenAiChat(
+            provider,
+            getCurrentApiKey(),
+            {
+              model,
+              messages: openaiMessages,
+              stream: true,
+              ...sampling,
+              ...(identity ? { user_id: identity.user_id } : {}),
+            },
+            controller.signal,
+            // 同一个会话固定用同一个 session id，便于上游做路由与提示缓存
+            sessionId
+          )
+        } else {
+          events = streamMessage(
+            getCurrentApiKey() || getDeepseekApiKey(),
+            {
+              model,
+              system,
+              messages,
+              thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+              ...sampling,
+              ...effortConfig,
+              ...(identity ? { metadata: identity } : {}),
+              ...(now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
+              tools: serverTools(initial.search ?? false),
+              ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
+            },
+            controller.signal
+          )
+        }
+        if (provider.protocol === 'openai') {
+          // OpenAI 兼容服务不返回标题，用本轮提问本地生成
+          applyLocalTitle(sessionId, controller, prepared.question.content)
+        }
         const blockIndexes = new Map<number, number>()
         for await (const event of events) {
           receivedContent ||= event.type === 'content_block_start'
@@ -1084,11 +1416,22 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     streamFlushes.delete(sessionId)
     cancelAnimationFrame(frame)
     updateReply(sessionId, reply)
+    // 记下这一轮真正发出去的 prompt 体量，供输入框的上下文圆环显示
+    noteContextUsage(sessionId, reply.usage, reply.model)
+    // 正常结束的回答才值得抽取记忆；失败与被拒绝的轮次不进记忆层
+    if (reply.status === 'done') {
+      void extractRoundMemory(sessionId, request.question.content, getReplyAnswerText(reply), [
+        request.question.id,
+        reply.id,
+      ])
+    }
     set((state) => ({
       streaming: Object.fromEntries(
         Object.entries(state.streaming).filter(([id]) => id !== sessionId)
       ),
     }))
     persist(sessionId)
+    // 流结束并解除占用后再判断，避免自己把自己判定为「正在生成」
+    void autoCompressAfterReply(sessionId)
   }
 }

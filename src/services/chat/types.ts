@@ -92,6 +92,14 @@ export type AssistantMessage = MessageBranch & {
   stopDetails?: StopDetails
   /** 最近一次请求的用量，续写后更新 */
   usage?: MessageUsage
+  /**
+   * 本地改写记录：改后的正文与思维链直接写回 blocks，这里只保存首次改写前的原始块快照，
+   * 用于「还原原文」。续写会让快照与当前块对不上，因此续写时丢弃该记录。
+   */
+  edited?: {
+    at: number
+    blocks: ReplyBlock[]
+  }
   error?: {
     /** upload：发送前补传附件失败，请求没有发出 */
     kind: ApiErrorKind | 'upload'
@@ -105,6 +113,20 @@ export type AssistantMessage = MessageBranch & {
 
 export type Message = UserMessage | AssistantMessage
 
+/**
+ * 长对话压缩记录：upToMessageId 是最后一条被摘要覆盖的消息（含它），
+ * 之后请求会跳过这条及之前的轮次，并把 summary 追加到系统提示词里。
+ * 本地完整历史不删除，切回较早分支时仍然可读。
+ */
+export type SessionCompression = {
+  summary: string
+  /** 摘要覆盖到的最后一条消息 id */
+  upToMessageId: string
+  /** 被摘要覆盖的轮数 */
+  rounds: number
+  at: number
+}
+
 export type Session = {
   id: string
   title: string
@@ -114,6 +136,8 @@ export type Session = {
   messages: Message[]
   /** undefined 表示线性消息列表；null 表示空会话。 */
   rootMessageId?: string | null
+  /** 较早轮次的压缩摘要；没有压缩过时为 undefined */
+  compression?: SessionCompression
 }
 
 /** 会话列表元数据；消息只在打开会话时加载。 */

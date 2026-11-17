@@ -4,6 +4,8 @@ import {
   toggleReadAloud,
   useReadAloud,
 } from '../../services/speech/readAloud.js'
+import { supportsDeepseekFeatures } from '../../services/api/providers.js'
+import { useSettings } from '../../services/settings.js'
 import { IconPlayMediaOutline16 } from '../base/icons.js'
 import { IconButton } from '../base/IconButton.js'
 import { showToast } from '../base/toastState.js'
@@ -13,11 +15,20 @@ import { ReadingBars } from './ReadingBars.js'
 export const ReadAloudButton = ({ messageId, text }: { messageId: string; text: string }) => {
   const t = useTranslate()
   const status = useReadAloud((state) => (state.messageId === messageId ? state.status : 'idle'))
+  /** 朗读走 DeepSeek 的 TTS，非 DeepSeek 服务商下置灰 */
+  const available = useSettings((state) => supportsDeepseekFeatures(state.provider))
   return (
     <IconButton
       icon={status === 'idle' ? <IconPlayMediaOutline16 /> : <ReadingBars mode={status} />}
-      tooltip={status === 'idle' ? t('ttsPlay') : t('ttsStop')}
+      tooltip={
+        !available
+          ? t('chatInputNeedsDeepseekProvider')
+          : status === 'idle'
+            ? t('ttsPlay')
+            : t('ttsStop')
+      }
       tooltipPlacement="bottom"
+      disabled={!available}
       onClick={() =>
         toggleReadAloud(messageId, text, (error) => showToast(describeReadAloudError(error)))
       }
