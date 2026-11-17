@@ -12,6 +12,7 @@ import {
   review,
 } from './ebbinghaus.js'
 import { extractFromRound } from './extract.js'
+import { ensureServerMigrated } from '../platform/migrateToServer.js'
 import * as db from './db.js'
 import { DEFAULT_MEMORY_BUDGET, type MemoryEntry, type MemoryView } from './types.js'
 
@@ -46,6 +47,7 @@ export const initMemory = async (): Promise<void> => {
   if (get().ready) {
     return
   }
+  await ensureServerMigrated().catch(() => {})
   const entries = await db.listMemories()
   const now = Date.now()
   const stale = entries.filter(

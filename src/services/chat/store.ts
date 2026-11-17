@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { prepareImageFile } from '../../utils/image.js'
+import { ensureServerMigrated } from '../platform/migrateToServer.js'
 import { ApiError, streamMessage, streamOpenAiChat } from '../api/client.js'
 import { DEEPSEEK_ORIGIN, getProvider, supportsDeepseekFeatures } from '../api/providers.js'
 import { streamResponses, toResponsesInput } from '../api/responses.js'
@@ -334,6 +335,8 @@ export const initChat = (): Promise<void> => {
   set({ initError: false })
   initTask = (async () => {
     try {
+      // 先把浏览器旧数据迁到本机 SQLite；迁移失败不写标记，下次启动会重试
+      await ensureServerMigrated()
       const summaries = await db.loadSessionSummaries()
       if (epoch === historyEpoch) {
         set({ ready: true, sessions: sortSessions(summaries) })

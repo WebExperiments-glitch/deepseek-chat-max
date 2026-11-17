@@ -92,16 +92,7 @@ export const createConfig = ({
       __DEV_PROXY_PREFIX__: JSON.stringify(dev ? DEV_PROXY_PREFIX : ''),
     }),
     new rspack.CopyRspackPlugin({
-      patterns: [
-        { from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' },
-        // sql.js 运行时按页面地址加载 wasm，必须与 index.html 同目录
-        {
-          from: path.resolve(root, 'node_modules/sql.js/dist/sql-wasm.wasm'),
-          to: 'sql-wasm.wasm',
-          toType: 'file',
-          noErrorOnMissing: true,
-        },
-      ],
+      patterns: [{ from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' }],
     }),
   ],
   performance: { hints: false },
@@ -113,6 +104,11 @@ export const createConfig = ({
     ...(dev
       ? {
           proxy: [
+            {
+              context: ['/api'],
+              target: 'http://127.0.0.1:8787',
+              changeOrigin: true,
+            },
             {
               context: [`${DEV_PROXY_PREFIX}/openrouter`],
               target: 'https://openrouter.ai',

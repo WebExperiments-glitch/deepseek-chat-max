@@ -7,8 +7,12 @@
 const currentVersion = (): string =>
   document.querySelector('meta[name="application-version"]')?.getAttribute('content') ?? ''
 
-/** 入口 HTML 与当前页面同源同目录；子路径部署时也能取到 */
-const entryUrl = (): string => new URL('index.html', window.location.href).href
+/** 入口 HTML 与当前页面同源同目录；带时间戳避免 Service Worker 命中旧缓存 */
+const entryUrl = (): string => {
+  const url = new URL('index.html', window.location.href)
+  url.searchParams.set('__v', String(Date.now()))
+  return url.href
+}
 
 export const checkForUpdate = (onUpdate: () => void): (() => void) => {
   let cancelled = false
