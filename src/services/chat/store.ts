@@ -254,6 +254,22 @@ export const renameSession = (id: string, title: string) => {
 }
 
 /**
+ * 置顶只改列表顺序，不修改会话正文，因此不需要 persist；
+ * 失败时保留乐观结果并记录错误，下次刷新会回到数据库里的真实状态。
+ */
+export const setSessionPinned = (id: string, pinned: boolean) => {
+  if (get().importingHistory || deletingSessions.has(id)) {
+    return
+  }
+  set((state) => ({
+    sessions: sortSessions(
+      state.sessions.map((session) => (session.id === id ? { ...session, pinned } : session))
+    ),
+  }))
+  void db.setSessionPinned(id, pinned).catch(db.reportStorageError('pin session'))
+}
+
+/**
  * 删除会话；本地原件仅在没有其他会话引用时清理。远端文件不删：导入、编辑、重新生成都会复用同一个附件，
  * 同一服务端文件可能被多个会话引用，不维护引用计数。
  */

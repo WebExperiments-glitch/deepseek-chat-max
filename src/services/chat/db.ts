@@ -47,6 +47,11 @@ export const renameSession = async (id: string, title: string): Promise<void> =>
   await patchJson(`/api/sessions/${encodeURIComponent(id)}`, { title })
 }
 
+/** 置顶只改列表排序，不触碰会话正文 */
+export const setSessionPinned = async (id: string, pinned: boolean): Promise<void> => {
+  await patchJson(`/api/sessions/${encodeURIComponent(id)}`, { pinned })
+}
+
 /** 删除会话，服务端会清理已无会话引用的本地原件；远端文件不删。 */
 export const deleteSession = async (sessionId: string): Promise<void> => {
   await deleteJson(`/api/sessions/${encodeURIComponent(sessionId)}`)

@@ -120,6 +120,18 @@ export const IconZoomOutOutline16 = () => (
   </svg>
 )
 
+export const IconPinOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M9.8 1.7 14.3 6.2 12.4 6.9 9.9 9.4 9.5 12.1 8.5 13.1 2.9 7.5 3.9 6.5 6.6 6.1 9.1 3.6 9.8 1.7Z"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+    <path d="M5.6 10.4 2.2 13.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+)
+
 export const IconEditOutline16 = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path

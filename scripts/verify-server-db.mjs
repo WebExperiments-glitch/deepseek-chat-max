@@ -38,6 +38,21 @@ test('会话读写与重命名', () => {
   assert.equal(db.listSessions()[0].title, '新标题')
 })
 
+test('会话置顶只影响排序且不会被保存覆盖', () => {
+  db.putSession(session('s1', '旧标题'))
+  db.putSession(session('s2', '新标题'))
+  assert.equal(db.setSessionPinned('s1', true), true)
+  assert.deepEqual(db.listSessions().map((item) => item.id), ['s1', 's2'])
+  assert.equal(db.listSessions()[0].pinned, true)
+
+  // 再次保存会话正文不应把 pinned 重置
+  db.putSession(session('s1', '改名后'))
+  assert.equal(db.listSessions()[0].pinned, true)
+  db.setSessionPinned('s1', false)
+  assert.equal(db.listSessions()[0].pinned, false)
+  db.deleteSession('s2')
+})
+
 test('附件二进制往返与删除回收', () => {
   db.putSession(session('s1', '带附件', ['f1']))
   db.putFiles([{ id: 'f1', mimeType: 'text/plain', data: Buffer.from('hello') }])

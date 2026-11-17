@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL,
   fileIds TEXT NOT NULL,
-  payload TEXT NOT NULL
+  payload TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS sessions_updated ON sessions(updatedAt DESC);
 
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS staging_sessions (
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL,
   fileIds TEXT NOT NULL,
-  payload TEXT NOT NULL
+  payload TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS staging_files (
@@ -79,6 +81,14 @@ CREATE TABLE IF NOT EXISTS meta (
 
 db.exec(SCHEMA)
 
+// 旧库补列：CREATE TABLE IF NOT EXISTS 不会修改已有表
+for (const table of ['sessions', 'staging_sessions']) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all()
+  if (!columns.some((column) => column.name === 'pinned')) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`)
+  }
+}
+
 const fileIdsOf = (session) => [
   ...new Set(
     (session.messages ?? []).flatMap((message) =>
@@ -109,17 +119,31 @@ const transaction = (task) => {
 }
 
 const writeSession = (table, session) => {
-  db.prepare(
-    `INSERT OR REPLACE INTO ${table} (id, title, createdAt, updatedAt, fileIds, payload)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
+  const params = [
     session.id,
     session.title,
     session.createdAt,
     session.updatedAt,
     JSON.stringify(fileIdsOf(session)),
-    JSON.stringify(session)
-  )
+    JSON.stringify(session),
+  ]
+  if (table === 'staging_sessions') {
+    db.prepare(
+      `INSERT OR REPLACE INTO ${table} (id, title, createdAt, updatedAt, fileIds, payload, pinned)
+       VALUES (?, ?, ?, ?, ?, ?, 0)`
+    ).run(...params)
+    return
+  }
+  db.prepare(
+    `INSERT INTO sessions (id, title, createdAt, updatedAt, fileIds, payload)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       title = excluded.title,
+       createdAt = excluded.createdAt,
+       updatedAt = excluded.updatedAt,
+       fileIds = excluded.fileIds,
+       payload = excluded.payload`
+  ).run(...params)
 }
 
 const writeFile = (table, id, mimeType, data) => {
@@ -132,8 +156,15 @@ const writeFile = (table, id, mimeType, data) => {
 
 export const listSessions = () =>
   db
-    .prepare('SELECT id, title, createdAt, updatedAt FROM sessions ORDER BY updatedAt DESC')
+    .prepare(
+      'SELECT id, title, createdAt, updatedAt, pinned FROM sessions ORDER BY pinned DESC, updatedAt DESC'
+    )
     .all()
+    .map((row) => ({ ...row, pinned: row.pinned === 1 }))
+
+/** 置顶只影响列表排序，不改会话正文 */
+export const setSessionPinned = (id, pinned) =>
+  db.prepare('UPDATE sessions SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, id).changes > 0
 
 export const getSession = (id) => {
   const row = db.prepare('SELECT payload FROM sessions WHERE id = ?').get(id)
@@ -245,8 +276,8 @@ export const commitStaging = () =>
     db.prepare('DELETE FROM sessions').run()
     db.prepare('DELETE FROM files').run()
     db.prepare(
-      `INSERT INTO sessions (id, title, createdAt, updatedAt, fileIds, payload)
-       SELECT id, title, createdAt, updatedAt, fileIds, payload FROM staging_sessions`
+      `INSERT INTO sessions (id, title, createdAt, updatedAt, fileIds, payload, pinned)
+       SELECT id, title, createdAt, updatedAt, fileIds, payload, pinned FROM staging_sessions`
     ).run()
     db.prepare(
       'INSERT INTO files (id, mimeType, data) SELECT id, mimeType, data FROM staging_files'

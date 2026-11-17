@@ -25,7 +25,11 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const sessions = useChatStore((state) => state.sessions)
   const activeId = useChatStore((state) => state.activeId)
   const [now, setNow] = useState(Date.now)
-  const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
+  const { pinned, groups } = useMemo(() => {
+    const pinnedSessions = sessions.filter((session) => session.pinned)
+    const rest = sessions.filter((session) => !session.pinned)
+    return { pinned: pinnedSessions, groups: groupSessions(rest, now, t) }
+  }, [sessions, now, t])
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
 
@@ -86,6 +90,19 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
       </button>
       <div className={styles.listWrap}>
         <div className={styles.list}>
+          {pinned.length > 0 ? (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>{t('pinnedSessions')}</div>
+              {pinned.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  active={session.id === activeId}
+                  onDelete={() => setDeleting(session)}
+                />
+              ))}
+            </div>
+          ) : null}
           {groups.map((group) => (
             <div key={group.key} className={styles.section}>
               <div className={styles.sectionHeader}>{group.label}</div>

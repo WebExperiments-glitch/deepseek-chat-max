@@ -67,7 +67,9 @@ export const useChatStore = create<ChatState>(() => ({
 export const { getState: get, setState: set } = useChatStore
 
 export const sortSessions = (sessions: SessionSummary[]) =>
-  [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  [...sessions].sort(
+    (a, b) => Number(b.pinned === true) - Number(a.pinned === true) || b.updatedAt - a.updatedAt
+  )
 
 export const getSession = (id: string) => {
   const cache = get().sessionCache

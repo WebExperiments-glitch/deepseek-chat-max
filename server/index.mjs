@@ -20,6 +20,7 @@ import {
   putSession,
   putStagingSession,
   renameSession,
+  setSessionPinned,
   stats,
   updateStagingFileTypes,
 } from './db.mjs'
@@ -164,8 +165,13 @@ const api = async (req, res, url) => {
     }
     if (method === 'PATCH') {
       const body = await readJson(req)
+      if (typeof body.pinned === 'boolean') {
+        return setSessionPinned(id, body.pinned)
+          ? sendJson(res, 200, { ok: true })
+          : sendError(res, 404, 'session not found')
+      }
       if (typeof body.title !== 'string') {
-        return sendError(res, 400, 'title is required')
+        return sendError(res, 400, 'title or pinned is required')
       }
       return renameSession(id, body.title)
         ? sendJson(res, 200, { ok: true })

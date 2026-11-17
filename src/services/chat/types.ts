@@ -140,8 +140,10 @@ export type Session = {
   compression?: SessionCompression
 }
 
-/** 会话列表元数据；消息只在打开会话时加载。 */
-export type SessionSummary = Pick<Session, 'id' | 'title' | 'createdAt' | 'updatedAt'>
+/** 会话列表元数据；消息只在打开会话时加载。pinned 只影响排序，不写进会话正文。 */
+export type SessionSummary = Pick<Session, 'id' | 'title' | 'createdAt' | 'updatedAt'> & {
+  pinned?: boolean
+}
 
 /** 显式提取字段，避免将完整会话的消息带进列表。 */
 export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
@@ -149,4 +151,5 @@ export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
   title: session.title,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
+  ...(session.pinned ? { pinned: true } : {}),
 })
