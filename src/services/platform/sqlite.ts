@@ -12,6 +12,9 @@ import { SCHEMA_SQL, SCHEMA_VERSION } from './sqlSchema.js'
  * 持久化方式：整个数据库在内存中运行，改动后用 db.export() 导出成字节流，
  * 防抖写入 IndexedDB 的单条快照。SQLite 负责表结构和查询，IndexedDB 只负责存放这个文件。
  * 页面隐藏或关闭时立即刷盘一次，降低最后一次改动丢失的概率。
+ *
+ * 边界：单库快照适合几十 MB 以内的数据。附件累积到几十 MB 后，每次保存都要导出整库，
+ * 内存和写入成本会明显上升；到那时应把附件拆到独立库，或改用 OPFS 增量写入。
  */
 
 interface SnapshotDB extends DBSchema {
@@ -23,10 +26,13 @@ const SNAPSHOT_STORE = 'database'
 const SNAPSHOT_KEY = 'main'
 /** 连续写入时的合并窗口；太短会反复导出整库，太长会丢更多数据 */
 const SAVE_DELAY = 300
+/** 超过这个体量就提示一次：继续增大前应该换存储策略 */
+const SNAPSHOT_WARN_BYTES = 32 * 1024 * 1024
 
 let database: Database | null = null
 let opening: Promise<Database> | null = null
 let dirty = false
+let warnedLargeSnapshot = false
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let saveChain: Promise<void> = Promise.resolve()
 let opQueue: Promise<unknown> = Promise.resolve()
@@ -59,7 +65,16 @@ const flush = async (): Promise<void> => {
   }
   dirty = false
   try {
-    await writeSnapshot(db.export())
+    const bytes = db.export()
+    if (!warnedLargeSnapshot && bytes.byteLength > SNAPSHOT_WARN_BYTES) {
+      warnedLargeSnapshot = true
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[sqlite] snapshot is ${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB; ` +
+          'split attachments into a separate database or switch to OPFS before it grows further'
+      )
+    }
+    await writeSnapshot(bytes)
   } catch (error) {
     // 写失败保留脏标记，下一次操作或页面隐藏时再试
     dirty = true
