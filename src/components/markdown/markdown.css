@@ -356,17 +356,61 @@
   }
 }
 
+/* Mermaid：外层定位工具条，内层滚动与缩放 */
+.md-mermaid-host {
+  position: relative;
+  background: var(--dsw-alias-markdown-code-block);
+  border-radius: 12px;
+  overflow: hidden;
+
+  &:hover .md-mermaid-toolbar,
+  &:focus-within .md-mermaid-toolbar {
+    opacity: 1;
+  }
+}
+
 .md-mermaid-diagram {
   padding: 16px;
   overflow: auto;
   text-align: center;
 
-  > svg {
+  > .md-mermaid-canvas > svg {
     display: block;
     max-width: 100%;
     height: auto;
     margin: 0 auto;
   }
+}
+
+.md-mermaid-canvas {
+  display: inline-block;
+}
+
+/* 工具条：右上角悬浮，hover 显示；触屏设备常显 */
+.md-mermaid-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+@media (hover: none) {
+  .md-mermaid-toolbar {
+    opacity: 1;
+  }
+}
+
+.md-mermaid-scale {
+  min-width: 38px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .md-mermaid-status {

@@ -104,6 +104,22 @@ export const IconDownloadOutline16 = () => (
   </svg>
 )
 
+export const IconZoomInOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="7.1" cy="7.1" r="4.35" stroke="currentColor" strokeWidth="1.2" />
+    <path d="M10.45 10.45L13.3 13.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    <path d="M7.1 5.15V9.05M5.15 7.1H9.05" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+)
+
+export const IconZoomOutOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="7.1" cy="7.1" r="4.35" stroke="currentColor" strokeWidth="1.2" />
+    <path d="M10.45 10.45L13.3 13.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    <path d="M5.15 7.1H9.05" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+)
+
 export const IconEditOutline16 = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path

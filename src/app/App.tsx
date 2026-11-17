@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
+import { checkForUpdate } from './updateChecker.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
   bindChatPersistence,
@@ -52,8 +53,18 @@ export const App = () => {
     state.activeId === null ? false : Object.hasOwn(state.streaming, state.activeId)
   )
   const activeId = useChatStore((state) => state.activeId)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
 
   usePreventPageScroll(isMobile)
+
+  useEffect(() => checkForUpdate(() => setUpdateAvailable(true)), [])
+
+  /** 带时间戳重载，强制绕过缓存的旧 HTML/JS */
+  const reloadLatest = () => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('__v', String(Date.now()))
+    window.location.href = url.href
+  }
 
   useEffect(() => {
     document.documentElement.lang = locale
@@ -94,6 +105,11 @@ export const App = () => {
       <div ref={frameRef} className={styles.frame}>
         {isMobile ? <MobileSider /> : siderCollapsed ? null : <Sider />}
         <main className={styles.main}>
+          {updateAvailable ? (
+            <button type="button" className={styles.updateBanner} onClick={reloadLatest}>
+              {t('updateAvailable')}
+            </button>
+          ) : null}
           {saveError ? (
             <div className={styles.saveError} role="alert">
               <span>{t('sessionSaveFailed')}</span>

@@ -108,10 +108,13 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       return
     }
     // 附件上传固定走 DeepSeek 的 Files API
-    const error = addDraftFiles(sessionId, files, getDeepseekApiKey())
-    if (error) {
-      showToast(error)
-    }
+    void addDraftFiles(sessionId, files, getDeepseekApiKey())
+      .then((error) => {
+        if (error) {
+          showToast(error)
+        }
+      })
+      .catch(() => showToast('uploadFileStatusFailed'))
   }
   const retryFile = useCallback(
     (id: string) => {

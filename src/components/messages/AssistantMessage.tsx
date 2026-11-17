@@ -60,12 +60,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   const view = useReplyView(message, streaming)
   const panelEntry = useSearchPanel((state) => state.entry)
   const notice = streaming ? null : describeReply(message)
-  // 安全拒绝：已下发的思考与正文按协议丢弃，只显示模板答复。
+  // 安全拒绝：保留已下发的思考与正文，另外加一条拒答提示（含服务端给的原因）
   const refused = message.stopReason === 'refusal'
-  const answer = refused ? null : view.answer
+  const answer = view.answer
   // 服务端会指出哪些图片被拦截（stop_details.explanation）；可在设置里关掉
   const showRefusalDetail = useSettings((state) => state.showRefusalDetail)
-  const refusalDetail = refused && showRefusalDetail ? (message.stopDetails?.explanation ?? '') : ''
+  const refusalReason = refused && showRefusalDetail ? (message.stopDetails?.explanation ?? '') : ''
   const responseText = [answer?.text, notice?.presentation === 'response' ? notice.text : null]
     .filter(Boolean)
     .join('\n\n')
@@ -105,19 +105,21 @@ export const AssistantMessage = memo(function AssistantMessage({
   }
   return (
     <div className={styles.message}>
-      {refusalDetail ? (
-        <p className={styles.refusalDetail} role="note">
-          {refusalDetail}
-        </p>
+      {refused && !streaming ? (
+        <div className={clsx(styles.notice, styles.refusalNotice)}>
+          <IconWarningOutline16 />
+          <span>
+            {t('replyRefused')}
+            {refusalReason ? ` ${t('refusalReason', { reason: refusalReason })}` : null}
+          </span>
+        </div>
       ) : null}
-      {refused ? null : (
-        <ReplyArea
-          message={message}
-          view={view}
-          streaming={streaming}
-          hasResponse={!!responseText}
-        />
-      )}
+      <ReplyArea
+        message={message}
+        view={view}
+        streaming={streaming}
+        hasResponse={!!responseText}
+      />
       {answer ? (
         <Markdown
           className="ds-assistant-message-main-content"

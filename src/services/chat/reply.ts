@@ -149,14 +149,12 @@ export const settleReply = (
   ...reply,
   status,
   error,
-  blocks: reply.blocks.flatMap((block): ReplyBlock[] => {
-    if (reply.stopReason === 'refusal' && (block.type === 'thinking' || block.type === 'text')) {
-      return []
-    }
-    return block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined
-      ? [{ ...block, endedAt: now }]
-      : [block]
-  }),
+  // 拒答时保留已经下发的思考与正文：界面上改为附加一条拒答提示，而不是抹掉回答
+  blocks: reply.blocks.map((block) =>
+    block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined
+      ? { ...block, endedAt: now }
+      : block
+  ),
 })
 
 /** 回复里所有文本块拼起来，用于复制与判断是否有回答 */

@@ -20,6 +20,18 @@
   min-height: 0;
 }
 
+/* 新版本提示：整条横幅可点，直接带时间戳重载 */
+.updateBanner {
+  width: 100%;
+  padding: 10px 16px;
+  border: 0;
+  background-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
 .saveError {
   display: flex;
   align-items: center;

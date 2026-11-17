@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
+import { prepareImageFile } from '../../utils/image.js'
 import { ApiError, streamMessage, streamOpenAiChat } from '../api/client.js'
 import { DEEPSEEK_ORIGIN, getProvider, supportsDeepseekFeatures } from '../api/providers.js'
 import { streamResponses, toResponsesInput } from '../api/responses.js'
@@ -891,6 +892,17 @@ const ensureServerId = async (apiKey: string, file: FileAttachment): Promise<str
   if (!blob) {
     return null
   }
+  // 导入或旧版本存下的图片可能是不被支持的格式（HEIC 伪装成 jpg、CMYK、渐进式 JPEG）。
+  // 一律先过 prepareImageFile：它会对 JPEG 重新编码、对 PNG/GIF/WebP 原样保留。
+  if (file.isImage) {
+    const converted = await prepareImageFile(
+      new File([blob], file.name || 'image', { type: blob.type || file.mimeType || '' })
+    )
+    if (converted) {
+      return uploadAttachment(apiKey, file.id, converted, converted.name, true)
+    }
+    // 无法解码时仍用原件补传，由服务端决定是否接受，避免直接丢失附件。
+  }
   return uploadAttachment(apiKey, file.id, blob, file.name, file.isImage)
 }
 
@@ -948,7 +960,8 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
   }
 
   const pending = new Map<string, FileAttachment>()
-  for (const [user] of getContextRounds(request.history).toReversed()) {
+  // 不用 toReversed：旧版 iOS Safari 没有这个方法，补传历史附件时会抛错。
+  for (const [user] of [...getContextRounds(request.history)].reverse()) {
     for (const file of user.files) {
       if (!file.serverId && !serverIds.has(file.id) && !pending.has(file.id)) {
         pending.set(file.id, file)

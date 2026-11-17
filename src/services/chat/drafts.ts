@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { TranslationMessage } from '../../i18n/index.js'
 import { createId } from '../../utils/id.js'
+import { prepareImageFile } from '../../utils/image.js'
 import {
   cancelUpload,
   isImage,
@@ -58,11 +59,11 @@ const upload = (attachment: DraftAttachment, apiKey: string) => {
 }
 
 /** 整批校验通过后才创建预览和开始上传。 */
-export const addDraftFiles = (
+export const addDraftFiles = async (
   sessionId: string | null,
   files: File[],
   apiKey: string
-): TranslationMessage | null => {
+): Promise<TranslationMessage | null> => {
   if (files.length === 0) {
     return null
   }
@@ -70,7 +71,14 @@ export const addDraftFiles = (
   if (error) {
     return error
   }
-  const added = files.map((file): DraftAttachment => {
+  // 图片先归一化再入库：iPhone 的 CMYK/渐进式 JPEG、HEIC 伪装成 .jpg 都会被服务端拒绝。
+  // 无法解码时保留原件，由服务端决定是否接受，避免直接丢掉附件。
+  const prepared = await Promise.all(
+    files.map(async (file) =>
+      isImage(resolveMimeType(file)) ? ((await prepareImageFile(file)) ?? file) : file
+    )
+  )
+  const added = prepared.map((file): DraftAttachment => {
     const image = isImage(resolveMimeType(file))
     return {
       id: createId(),
