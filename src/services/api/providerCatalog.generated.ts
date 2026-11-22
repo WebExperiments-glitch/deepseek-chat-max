@@ -139,6 +139,17 @@ export const PROVIDER_CATALOG: CatalogProvider[] = [
     "protocol": "anthropic"
   },
   {
+    "id": "agnes",
+    "name": "Agnes AI",
+    "baseURL": "https://apihub.agnes-ai.com/v1",
+    "modelsURL": "https://apihub.agnes-ai.com/v1/models",
+    "env": [
+      "AGNES_API_KEY"
+    ],
+    "modelCount": 4,
+    "protocol": "openai"
+  },
+  {
     "id": "volcengine",
     "name": "Volcengine Ark",
     "baseURL": "https://ark.cn-beijing.volces.com/api/v3",
@@ -915,17 +926,6 @@ export const PROVIDER_CATALOG: CatalogProvider[] = [
     "modelsURL": "https://korouter.ai/v1/models",
     "env": [
       "KOROUTER_API_KEY"
-    ],
-    "modelCount": 19,
-    "protocol": "openai"
-  },
-  {
-    "id": "cheapest-token",
-    "name": "CheapestToken",
-    "baseURL": "https://api.cheapest-token.com/v1",
-    "modelsURL": "https://api.cheapest-token.com/v1/models",
-    "env": [
-      "CHEAPEST_TOKEN_API_KEY"
     ],
     "modelCount": 19,
     "protocol": "openai"

@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -54,6 +54,64 @@ const MAX_JSON = 20 * 1024 * 1024
 const MAX_BLOB = 80 * 1024 * 1024
 const MAX_SESSION_BATCH = 48 * 1024 * 1024
 const MAX_FILE_BATCH = 96 * 1024 * 1024
+
+/**
+ * 通用服务商代理：浏览器直连多数模型网关会被 CORS 拦（鉴权失败响应尤其没有 CORS 头）。
+ * 本地服务把 /provider/:id/<rest> 转发到该 provider 的真实端点，透传鉴权头与请求体，
+ * 并流式回传响应（含 SSE）。目标端点来自随仓库的 provider-catalog.json（models.dev 生成）。
+ */
+let PROVIDER_CATALOG = []
+try {
+  PROVIDER_CATALOG = JSON.parse(readFileSync(path.join(import.meta.dirname, 'provider-catalog.json'), 'utf8'))
+} catch {
+  // 清单缺失时代理不可用，不影响其他功能
+}
+
+const proxyProvider = async (req, res, pathname) => {
+  // pathname: /provider/<id>/<rest...>
+  const parts = pathname.split('/').filter(Boolean)
+  const id = parts[1]
+  const rest = parts.slice(2).join('/')
+  const provider = PROVIDER_CATALOG.find((p) => p.id === id)
+  if (!provider) {
+    return sendError(res, 404, `unknown provider: ${id ?? ''}`)
+  }
+  const search = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).search
+  const target = `${provider.baseURL.replace(/\/+$/, '')}/${rest}${search}`
+
+  // 透传请求头：去掉 hop-by-hop 与 host，保留 Authorization / x-api-key / content-type 等
+  const headers = {}
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value === undefined) continue
+    if (['host', 'connection', 'content-length', 'transfer-encoding'].includes(key.toLowerCase())) continue
+    headers[key] = value
+  }
+
+  const method = req.method ?? 'GET'
+  const hasBody = method !== 'GET' && method !== 'HEAD'
+  const upstream = await fetch(target, {
+    method,
+    headers,
+    ...(hasBody ? { body: req } : {}),
+  })
+
+  // 回传状态码与响应头（去掉 hop-by-hop）
+  const resHeaders = {}
+  upstream.headers.forEach((value, key) => {
+    if (['connection', 'transfer-encoding', 'content-length', 'content-encoding'].includes(key.toLowerCase())) return
+    resHeaders[key] = value
+  })
+  res.writeHead(upstream.status, resHeaders)
+  if (upstream.body) {
+    const reader = upstream.body.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      res.write(value)
+    }
+  }
+  res.end()
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -527,6 +585,10 @@ const server = createServer((req, res) => {
   const run = async () => {
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       await api(req, res, url)
+      return
+    }
+    if (url.pathname.startsWith('/provider/')) {
+      await proxyProvider(req, res, url.pathname)
       return
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {

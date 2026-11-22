@@ -112,7 +112,7 @@ export const createConfig = ({
       ? {
           proxy: [
             {
-              context: ['/api'],
+              context: ['/api', '/provider'],
               target: 'http://127.0.0.1:8787',
               changeOrigin: true,
             },

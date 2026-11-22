@@ -16,6 +16,7 @@ const SOURCE = process.env.MODELS_DEV_URL ?? 'https://models.dev/api.json'
 const FEATURED = [
   'openai', 'anthropic', 'deepseek', 'google', 'google-vertex', 'groq', 'openrouter',
   'mistral', 'cohere', 'xai', 'togetherai', 'fireworks', 'cerebras', 'replicate',
+  'agnes',
   'moonshotai', 'zai', 'minimax', 'minimax-cn', 'baidu', 'alibaba', 'qwen', 'doubao',
   'volcengine', 'siliconflow', 'bailian', 'bigmodel', 'venice', 'perplexity',
   'github-copilot', 'github-models', 'vercel-ai-gateway', 'opencode', 'nvidia',
@@ -79,6 +80,17 @@ const finalProviders = chosen
     protocol: protocolOf(e),
   }))
 
+// 最终清单：同时输出给前端的 TS 与给本地服务的 JSON（通用代理查目标端点用）
+const catalog = finalProviders.map((e) => ({
+  id: e.id,
+  name: e.name,
+  baseURL: e.api,
+  modelsURL: `${e.api.replace(/\/+$/, '')}/models`,
+  env: e.env,
+  modelCount: e.models,
+  protocol: e.protocol,
+}))
+
 const header = `// 自动生成，勿手改。来源：models.dev api.json（MIT）。
 // 生成命令：node scripts/gen-provider-catalog.mjs
 // 这是「供应商品牌清单」：只存端点与 Key 名，模型元数据由 modelMeta.ts 运行时提供。
@@ -97,20 +109,12 @@ export type CatalogProvider = {
   protocol: 'openai' | 'anthropic'
 }
 
-export const PROVIDER_CATALOG: CatalogProvider[] = ${JSON.stringify(
-  finalProviders.map((e) => ({
-    id: e.id,
-    name: e.name,
-    baseURL: e.api,
-    modelsURL: `${e.api.replace(/\/+$/, '')}/models`,
-    env: e.env,
-    modelCount: e.models,
-    protocol: e.protocol,
-  })),
-  null,
-  2
-)}
+export const PROVIDER_CATALOG: CatalogProvider[] = ${JSON.stringify(catalog, null, 2)}
 `
 
 writeFileSync(new URL('../src/services/api/providerCatalog.generated.ts', import.meta.url), header)
-console.log(`生成 ${finalProviders.length} 个供应商 -> src/services/api/providerCatalog.generated.ts`)
+writeFileSync(
+  new URL('../server/provider-catalog.json', import.meta.url),
+  JSON.stringify(catalog, null, 2)
+)
+console.log(`生成 ${catalog.length} 个供应商 -> src/services/api/providerCatalog.generated.ts + server/provider-catalog.json`)

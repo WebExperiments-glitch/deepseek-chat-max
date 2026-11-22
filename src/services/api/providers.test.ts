@@ -81,8 +81,8 @@ describe('服务商 ID 与注册表', () => {
     const id = PROVIDER_IDS.at(-2) ?? ''
     const p = getProvider(id)
     expect(p.id).toBe(id)
-    expect(p.baseURL).toMatch(/^https?:\/\//)
-    expect(p.modelsURL).toMatch(/^https?:\/\//)
+    expect(p.baseURL).toBe(`/provider/${id}`)
+    expect(p.modelsURL).toBe(`/provider/${id}/models`)
   })
 
   it('deepseek 使用 anthropic 协议与固定地址', () => {

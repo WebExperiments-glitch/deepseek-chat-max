@@ -159,13 +159,15 @@ for (const item of PROVIDER_CATALOG) {
   if (Object.hasOwn(PROVIDERS, item.id)) {
     continue
   }
-  // 品牌清单里的供应商直连其真实地址（有 CORS 问题的少数可后续加代理规则）。
+  // 品牌清单里的供应商走本地通用代理（/provider/:id/...），绕开浏览器 CORS。
+  // 本地 Node 服务把请求转发到真实端点；开发时 rspack 再把 /provider 转到本地服务。
+  const proxyBase = `/provider/${item.id}`
   PROVIDERS[item.id] = {
     id: item.id,
     name: item.name,
     protocol: item.protocol,
-    baseURL: item.baseURL,
-    modelsURL: item.modelsURL,
+    baseURL: proxyBase,
+    modelsURL: `${proxyBase}/models`,
     defaultModel: '',
   }
 }
