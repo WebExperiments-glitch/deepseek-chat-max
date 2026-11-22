@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
+import { http } from '../../ports/http.js'
 import { classifyApiError } from '../../services/api/errors.js'
 import { getProvider, parseCustomModels, setCustomProviderConfig, useCustomProvider, type WireProtocol } from '../../services/api/providers.js'
 import { refreshModels, syncCustomModels } from '../../services/models.js'
@@ -81,7 +82,7 @@ export const CustomProviderFields = () => {
               messages: [{ role: 'user', content: 'ping' }],
               max_tokens: 1,
             }
-      const response = await fetch(url, {
+      const response = await http(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),

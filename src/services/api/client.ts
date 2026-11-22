@@ -1,4 +1,5 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
+import { http } from '../../ports/http.js'
 import { readMessageEvent } from './parseEvent.js'
 import {
   createOpenAiStreamState,
@@ -113,7 +114,7 @@ const readErrorResponse = async (
 export const request = async (url: string, init: RequestInit): Promise<Response> => {
   let response: Response
   try {
-    response = await fetch(url, init)
+    response = await http(url, init)
   } catch (error) {
     if (init.signal?.aborted) {
       throw error
@@ -132,7 +133,7 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
 /** no-cors 探测：请求已发出即说明服务可达，跨域被拦是 CORS 问题而不是网络问题 */
 const isCorsBlocked = async (url: string): Promise<boolean> => {
   try {
-    await fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store' })
+    await http(url, { method: 'GET', mode: 'no-cors', cache: 'no-store' })
     return true
   } catch {
     return false

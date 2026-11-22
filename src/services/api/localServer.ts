@@ -4,6 +4,7 @@
  * 开发时 Rspack 把 /api 代理到 127.0.0.1:8787；生产时同一个进程同时托管页面和 API。
  * 浏览器不再直接持有 SQLite，只通过这层访问本机数据库。
  */
+import { http } from '../../ports/http.js'
 
 export class LocalServerError extends Error {
   constructor(
@@ -16,7 +17,7 @@ export class LocalServerError extends Error {
 }
 
 const request = async (path: string, init?: RequestInit): Promise<Response> => {
-  const response = await fetch(path, init)
+  const response = await http(path, init)
   if (!response.ok) {
     let message = response.statusText
     try {

@@ -1,4 +1,5 @@
 import { DEEPSEEK_ORIGIN } from './providers.js'
+import { http } from '../../ports/http.js'
 
 /**
  * 文档 OCR：POST /v1/tools/ocr（multipart）。
@@ -30,7 +31,7 @@ export const recognizeDocument = async (
   const form = new FormData()
   form.append('purpose', purpose)
   form.append('file', blob, filename)
-  const response = await fetch(`${DEEPSEEK_ORIGIN}/v1/tools/ocr`, {
+  const response = await http(`${DEEPSEEK_ORIGIN}/v1/tools/ocr`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,

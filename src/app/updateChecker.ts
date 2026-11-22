@@ -3,6 +3,7 @@
  * 用户切换 App 再回来不会重新加载。这里在页面空闲时用 no-store 重新取一次入口 HTML，
  * 比对构建注入的版本号，发现不一致就通知界面提示刷新，避免一直用旧代码踩已修复的问题。
  */
+import { http } from '../ports/http.js'
 
 const currentVersion = (): string =>
   document.querySelector('meta[name="application-version"]')?.getAttribute('content') ?? ''
@@ -23,7 +24,7 @@ export const checkForUpdate = (onUpdate: () => void): (() => void) => {
       return
     }
     try {
-      const response = await fetch(entryUrl(), { cache: 'no-store', credentials: 'omit' })
+      const response = await http(entryUrl(), { cache: 'no-store', credentials: 'omit' })
       if (!response.ok) {
         return
       }

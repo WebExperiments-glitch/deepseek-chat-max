@@ -8,6 +8,8 @@
  * 该模块是可选加速：任何加载/环境问题都会静默回退到等价的 JS 实现，导入仍可正常完成。
  */
 
+import { http } from '../../../ports/http.js'
+
 type WasmExports = {
   memory: WebAssembly.Memory
   scratch_ptr: () => number
@@ -56,7 +58,7 @@ export const crc32Init = async (): Promise<void> => {
   }
   try {
     const url = new URL('./wasm/crc32_wasm.wasm', import.meta.url)
-    const response = await fetch(url)
+    const response = await http(url)
     if (!response.ok) {
       throw new Error(`wasm fetch failed: ${response.status}`)
     }

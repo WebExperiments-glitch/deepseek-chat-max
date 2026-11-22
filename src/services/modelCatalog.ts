@@ -10,6 +10,7 @@
 
 import { create } from 'zustand'
 import { readStorage, writeStorage } from './platform/storage.js'
+import { http } from '../ports/http.js'
 
 export type ModelCapability = {
   tools: boolean
@@ -186,7 +187,7 @@ export const loadModelCatalog = (): Promise<void> => {
   loadTask = (async () => {
     useModelCatalog.setState({ loading: true })
     try {
-      const response = await fetch(CATALOG_URL, { cache: 'no-store' })
+      const response = await http(CATALOG_URL, { cache: 'no-store' })
       if (!response.ok) {
         throw new Error(`catalog ${response.status}`)
       }

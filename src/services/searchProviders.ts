@@ -9,6 +9,7 @@
  * 纯 TS 注册表 + 工厂，与 UI 解耦；统一 WebSearchItem 归一化，调用方无需关心各家格式。
  */
 import type { WebSearchItem } from './api/webSearch.js'
+import { http } from '../ports/http.js'
 
 export type SearchProviderKind = 'server-tool' | 'standalone'
 
@@ -85,7 +86,7 @@ const genericSearch = (
   build: (key: string, query: string, count: number) => { url: string; init: RequestInit }
 ) => async (key: string, query: string, options: { count?: number }, signal?: AbortSignal): Promise<WebSearchItem[]> => {
     const { url, init } = build(key, query, Math.min(10, Math.max(1, options.count ?? 5)))
-    const response = await fetch(url, { ...init, signal })
+    const response = await http(url, { ...init, signal })
     if (!response.ok) {
       throw new Error(`${base} ${response.status}`)
     }

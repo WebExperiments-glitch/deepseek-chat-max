@@ -4,6 +4,7 @@ import type {
   MessageUsage,
   StopReason,
 } from './types.js'
+import { http } from '../../ports/http.js'
 import { ApiError } from './client.js'
 import { readServerSentEvents } from './sse.js'
 
@@ -165,7 +166,7 @@ export async function* streamResponses(
   body: ResponsesRequest,
   signal: AbortSignal
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await fetch(`${baseURL}/responses`, {
+  const response = await http(`${baseURL}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,

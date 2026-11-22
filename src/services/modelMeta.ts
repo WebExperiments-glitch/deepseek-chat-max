@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ModelOption } from './api/client.js'
 import { readStorage, writeStorage } from './platform/storage.js'
+import { http } from '../ports/http.js'
 
 /**
  * models.dev 的模型元数据。
@@ -148,7 +149,7 @@ export const loadModelMeta = (): Promise<void> => {
   loadTask = (async () => {
     useModelMeta.setState({ loading: true })
     try {
-      const response = await fetch(META_URL, { cache: 'no-store' })
+      const response = await http(META_URL, { cache: 'no-store' })
       if (!response.ok) {
         throw new Error(`models.dev ${response.status}`)
       }

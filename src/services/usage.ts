@@ -1,5 +1,6 @@
 import { DEEPSEEK_ANTHROPIC_BASE_URL } from './api/providers.js'
 import { getJson } from './api/localServer.js'
+import { http } from '../ports/http.js'
 
 export type UsageSession = {
   id: string
@@ -54,7 +55,7 @@ type ProbeCall = { usage: CacheProbeUsage; text: string }
 
 const probeOnce = async (apiKey: string, body: string): Promise<ProbeCall> => {
   const started = performance.now()
-  const response = await fetch(`${DEEPSEEK_ANTHROPIC_BASE_URL}/messages`, {
+  const response = await http(`${DEEPSEEK_ANTHROPIC_BASE_URL}/messages`, {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
     body,
