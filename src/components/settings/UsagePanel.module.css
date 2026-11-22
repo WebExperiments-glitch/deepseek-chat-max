@@ -38,12 +38,12 @@
 }
 
 .probeOk {
-  color: var(--dsw-alias-state-success-primary, #1a9e5c);
+  color: var(--dsw-alias-state-success-primary);
   font-weight: 600;
 }
 
 .probeMiss {
-  color: var(--dsw-alias-state-warning-primary, #bf8700);
+  color: var(--dsw-alias-state-warn-primary);
   font-weight: 600;
 }
 

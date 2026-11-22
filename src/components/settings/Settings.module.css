@@ -1,4 +1,4 @@
-.dialog {
+﻿.dialog {
   --modal-header-gap: 7px;
   width: 760px;
   height: 500px;
@@ -504,7 +504,7 @@
   background-color: var(--dsw-alias-button-primary-fill);
   color: var(--dsw-static-neutral-bluish-00);
   font: inherit;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 24px;
   font-weight: 500;
   cursor: pointer;
@@ -546,5 +546,13 @@
     white-space: normal;
     overflow-wrap: anywhere;
     max-width: 100%;
+  }
+}
+
+
+/* 无障碍：减少动效偏好下去掉过渡 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
   }
 }

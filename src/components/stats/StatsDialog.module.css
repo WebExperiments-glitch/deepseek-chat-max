@@ -1,4 +1,4 @@
-/* 会话统计：一屏看完上下文、缓存与用量，不做滚动式长列表 */
+﻿/* 会话统计：一屏看完上下文、缓存与用量，不做滚动式长列表 */
 .dialog {
   width: 480px;
   max-width: calc(100vw - 32px);
@@ -55,7 +55,7 @@
   height: 100%;
   border-radius: inherit;
   background-color: var(--dsw-alias-brand-primary);
-  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
 
 .barValue[data-level='high'] {
@@ -154,5 +154,13 @@
 @media (max-width: 640px) {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+
+/* 无障碍：减少动效偏好下，条形图直接到最终宽度，不做位移动画 */
+@media (prefers-reduced-motion: reduce) {
+  .barValue {
+    transition: none;
   }
 }
