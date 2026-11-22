@@ -378,6 +378,7 @@ export const en = {
     'Non-DeepSeek providers are chat only. Switch to the DeepSeek provider to use web search, attachments, speech, and read-aloud.',
   chatInputProviderNoKey: 'No API key for the current provider',
   modelNoImageSupport: 'This model does not accept images; they will be replaced with placeholder text',
+  modelNoVideoSupport: 'This model does not accept video; switch to a video-capable model to send videos',
   settingsLocaleZhCN: 'Simplified Chinese',
   settingsLocaleEnUS: 'English',
   contextUsageLabel: 'Context usage {percent}%',

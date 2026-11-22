@@ -271,12 +271,19 @@ const MIME_BY_EXT: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo',
+  m4v: 'video/x-m4v',
 }
 
 /** 取文件的 MIME：优先用浏览器给出的类型，缺失时按扩展名推断 */
 export const resolveMimeType = (file: File) => file.type || MIME_BY_EXT[getFileExt(file.name)] || ''
 
 export const isImage = (mimeType: string) => mimeType.startsWith('image/')
+export const isVideo = (mimeType: string) => mimeType.startsWith('video/')
 
 /** 文件扩展名（大写），用于卡片元信息 */
 export const getExtension = (name: string) => {

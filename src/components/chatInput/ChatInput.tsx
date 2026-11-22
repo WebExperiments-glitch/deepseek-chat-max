@@ -34,6 +34,7 @@ import { ensureApiKey, requireDeepseekKey } from '../settings/settingsDialogStat
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
+import { attachmentModality, createCapabilities } from '../../services/modelCapabilities.js'
 import { DraftAttachments } from './DraftAttachments.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
@@ -121,6 +122,13 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       return
     }
     if (!requireDeepseekKey()) {
+      return
+    }
+    // 视频能力检测：当前模型未声明支持 video 就不让加入（无 OCR 降级路径）
+    const caps = createCapabilities(listed?.inputModalities)
+    const videoFile = files.find((file) => attachmentModality(file.type || '') === 'video')
+    if (videoFile && !caps.video) {
+      showToast('modelNoVideoSupport')
       return
     }
     // 附件上传固定走 DeepSeek 的 Files API

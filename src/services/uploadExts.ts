@@ -22,6 +22,13 @@ export const ACCEPT_FILE_EXTS: string[] = [
   'bmp',
   'gif',
   'webp',
+  // 视频：能否发送由当前模型能力决定（见 modelCapabilities.ts），这里只进白名单
+  'mp4',
+  'mov',
+  'webm',
+  'mkv',
+  'avi',
+  'm4v',
   'ico',
   'xbm',
   'dib',

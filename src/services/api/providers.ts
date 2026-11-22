@@ -28,6 +28,31 @@ export type ProviderId = string
 /** 对话协议：anthropic 为 Messages API，openai 为 chat/completions */
 export type WireProtocol = 'anthropic' | 'openai'
 
+/** 服务商能力位（数据化，替代 id==='deepseek' 的单点硬编码） */
+export type ProviderCapabilities = {
+  /** 服务端联网工具（deepseek_web_search / deepseek_read_url） */
+  deepseekTools: boolean
+  /** Files API 附件上传 */
+  files: boolean
+  /** 语音（ASR / TTS） */
+  voice: boolean
+  /** 服务端自动生成标题 */
+  title: boolean
+}
+
+const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
+  deepseekTools: true,
+  files: true,
+  voice: true,
+  title: true,
+}
+const GENERIC_CAPABILITIES: ProviderCapabilities = {
+  deepseekTools: false,
+  files: false,
+  voice: false,
+  title: false,
+}
+
 export type Provider = {
   id: ProviderId
   /** 设置里展示的名称，不翻译 */
@@ -41,6 +66,8 @@ export type Provider = {
   defaultModel: string
   /** 对话请求需要额外携带的固定请求头 */
   headers?: Record<string, string>
+  /** 该服务商支持的能力位 */
+  capabilities: ProviderCapabilities
 }
 
 /** DeepSeek 的固定地址前缀：附件、语音与联网检索都只走这里 */
@@ -87,7 +114,8 @@ const openaiProvider = (
   chatBase: string,
   modelsURL: string,
   proxyPrefix: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  capabilities: ProviderCapabilities = GENERIC_CAPABILITIES
 ): Provider => ({
   id,
   name,
@@ -97,6 +125,7 @@ const openaiProvider = (
   // 网关的模型清单是动态的，这里不硬编码模型名：清单拉到后由设置页自动选中第一条
   defaultModel: '',
   ...(headers ? { headers } : {}),
+  capabilities,
 })
 
 export const PROVIDERS: Record<ProviderId, Provider> = {
@@ -108,6 +137,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     baseURL: DEEPSEEK_ANTHROPIC_BASE_URL,
     modelsURL: `${DEEPSEEK_ORIGIN}/models`,
     defaultModel: 'deepseek-flash',
+    capabilities: DEEPSEEK_CAPABILITIES,
   },
   'opencode-go': openaiProvider(
     'opencode-go',
@@ -148,6 +178,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     baseURL: '',
     modelsURL: '',
     defaultModel: '',
+    capabilities: GENERIC_CAPABILITIES,
   },
 }
 
@@ -169,6 +200,7 @@ for (const item of PROVIDER_CATALOG) {
     baseURL: proxyBase,
     modelsURL: `${proxyBase}/models`,
     defaultModel: '',
+    capabilities: GENERIC_CAPABILITIES,
   }
 }
 
@@ -274,8 +306,13 @@ export const getProvider = (id: ProviderId): Provider => {
     // 有清单地址才请求；否则由设置页直接使用手动模型
     modelsURL: modelsURL || (baseURL ? `${baseURL}/models` : ''),
     defaultModel: config.defaultModel.trim() || fallbackModel,
+    capabilities: GENERIC_CAPABILITIES,
   }
 }
 
-/** 联网搜索、附件、语音与朗读只对 DeepSeek 服务商开放，其他服务商只做对话 */
-export const supportsDeepseekFeatures = (id: ProviderId) => id === 'deepseek'
+/**
+ * 服务商是否支持 DeepSeek 专属能力（联网工具/附件/语音/标题）。
+ * 改为读取 capabilities 数据，不再硬编码 id 判断——调用方无需修改。
+ */
+export const supportsDeepseekFeatures = (id: ProviderId): boolean =>
+  getProvider(id).capabilities.deepseekTools

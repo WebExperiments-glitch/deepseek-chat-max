@@ -358,6 +358,7 @@ export const zh = {
     '非 DeepSeek 服务商只提供对话：联网搜索、附件、语音与朗读需要切换到 DeepSeek 服务商。',
   chatInputProviderNoKey: '当前服务商还没有 API Key',
   modelNoImageSupport: '当前模型不支持图片输入，图片会被替换为占位文本',
+  modelNoVideoSupport: '当前模型不支持视频输入，无法发送视频；请换用支持视频的模型',
   settingsLocaleZhCN: '简体中文',
   settingsLocaleEnUS: 'English',
   contextUsageLabel: '上下文占用 {percent}%',

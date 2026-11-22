@@ -43,6 +43,8 @@ import {
 import { composeSystemPrompt } from '../systemPrompt.js'
 import { getActivePresetPrompt } from '../../presets.js'
 import { digestWithProvider, getSearchProvider } from '../../searchProviders.js'
+import { createCapabilities } from '../../modelCapabilities.js'
+import { getOcrProvider } from '../../ocrProviders.js'
 import { formatTimeContext } from '../timeContext.js'
 import { extractRoundMemory, memoryBlockForQuery } from '../../memory/store.js'
 import * as db from '../db.js'
@@ -349,19 +351,30 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  */
 const resolveInlineAttachments = async (
   prepared: Request,
-  signal: AbortSignal
+  signal: AbortSignal,
+  modelId: string
 ): Promise<{ groups: InlineAttachment[][]; skipped: string[] }> => {
   const groups: InlineAttachment[][] = []
   const skipped: string[] = []
-  // 图片细节级别来自设置；OCR 固定用 DeepSeek Key（文档解析能力只在那里）
+  // 图片细节级别来自设置；OCR 引擎可插拔（内置 DeepSeek）
   const { imageDetail } = useSettings.getState()
   const ocrKey = getDeepseekApiKey()
+  // 当前模型的输入模态 → 能力位；未知模态按保守处理（无多模态）
+  const listed = useModels.getState().lists[useSettings.getState().provider]
+    .find((option) => option.id === modelId)
+  const capabilities = createCapabilities(listed?.inputModalities)
   const inline = async (files: FileAttachment[]): Promise<InlineAttachment[]> => {
     if (files.length === 0) {
       return []
     }
     signal.throwIfAborted()
-    const result = await inlineAttachments(files, { detail: imageDetail, ocrKey, signal })
+    const result = await inlineAttachments(files, {
+      detail: imageDetail,
+      ocrKey,
+      capabilities,
+      ocrProvider: getOcrProvider('deepseek'),
+      signal,
+    })
     skipped.push(...result.skipped.map((item) => item.name))
     return result.inline
   }
@@ -639,7 +652,7 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
         } else if (provider.protocol === 'openai') {
           // 联网搜索与附件只对 DeepSeek 开放，其他服务商只发送对话
           const inline = supportsDeepseekFeatures(provider.id)
-            ? await resolveInlineAttachments(prepared, controller.signal)
+            ? await resolveInlineAttachments(prepared, controller.signal, model)
             : {
                 groups: [] as InlineAttachment[][],
                 skipped: prepared.question.files.map((file) => file.name),

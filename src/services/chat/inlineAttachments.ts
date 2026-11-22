@@ -1,7 +1,8 @@
 import type { ImageDetail, InlineAttachment, SkippedAttachment } from '../api/toOpenAi.js'
 import type { FileAttachment } from './types.js'
 import { loadFile } from './db.js'
-import { recognizeDocument } from '../api/ocr.js'
+import { planDelivery, type ModelCapabilities } from '../modelCapabilities.js'
+import { getOcrProvider, type OcrProvider } from '../ocrProviders.js'
 
 /**
  * 把附件读成可以内联进 OpenAI 请求的内容：
@@ -120,8 +121,14 @@ const toDataUrl = (blob: Blob, mimeType: string): Promise<string> =>
 export type InlineOptions = {
   /** 图片细节级别，透传给 image_url.detail（file_id 引用时服务端忽略） */
   detail?: ImageDetail
-  /** 有 DeepSeek Key 时，PDF / Word / PPT 先走 OCR 转文本，而不是直接跳过 */
+  /** 兼容旧调用：有 Key 时对文档做 OCR */
   ocrKey?: string
+  /** 当前模型的输入能力；提供后按能力决定 native/ocr/reject（视频无能力→跳过） */
+  capabilities?: ModelCapabilities
+  /** OCR 引擎（可插拔）；缺省用内置 DeepSeek */
+  ocrProvider?: OcrProvider
+  /** OCR 引擎所需的 Key */
+  ocrProviderKey?: string
   signal?: AbortSignal
 }
 
@@ -136,14 +143,80 @@ export const inlineAttachments = async (
   const inline: InlineAttachment[] = []
   const skipped: SkippedAttachment[] = []
   let dataChars = 0
+
+  const ocrProvider = options.ocrProvider ?? getOcrProvider('deepseek')
+  const ocrKey = options.ocrProviderKey ?? options.ocrKey ?? ''
+  const ocrAvailable = !!ocrKey
+
+  // 执行 OCR：用可插拔 provider，结果作为带 source:'ocr' 的文本
+  const doOcr = async (file: FileAttachment, blob: Blob): Promise<boolean> => {
+    try {
+      const text = await ocrProvider.recognize(
+        ocrKey, blob, file.name, 'text_recognition', options.signal
+      )
+      if (text.trim() === '') {
+        skipped.push({ name: file.name })
+        return false
+      }
+      inline.push({ kind: 'text', name: file.name, text, source: 'ocr' })
+      return true
+    } catch {
+      // OCR 失败不影响主请求，按未进入请求处理
+      skipped.push({ name: file.name })
+      return false
+    }
+  }
+
   for (const file of files) {
     const ext = extOf(file.name)
     const isText = !file.isImage && TEXT_EXTS.has(ext)
-    const canOcr = !file.isImage && !isText && OCR_EXTS.has(ext) && !!options.ocrKey
-    if (!file.isImage && !isText && !canOcr) {
-      skipped.push({ name: file.name })
-      continue
+    const mime = file.mimeType || ''
+
+    // 能力驱动决策（提供 capabilities 时）：视频无能力→跳过；图片/文档无能力→OCR
+    if (options.capabilities) {
+      const plan = planDelivery(options.capabilities, mime, { ocrAvailable })
+      if (plan.kind === 'reject') {
+        // 视频等无降级路径的模态：不发送
+        skipped.push({ name: file.name })
+        continue
+      }
+      if (plan.kind === 'ocr') {
+        if (file.size > MAX_DOCUMENT_BYTES) {
+          skipped.push({ name: file.name })
+          continue
+        }
+        const blob = await loadFile(file.id)
+        if (!blob || !(await doOcr(file, blob))) {
+          if (blob && !skipped.some((s) => s.name === file.name)) {
+            skipped.push({ name: file.name })
+          }
+        }
+        continue
+      }
+      // kind === 'native'：走下面的既有处理
+    } else {
+      // 兼容旧调用（未提供能力）：保持原三分类
+      const canOcr = !file.isImage && !isText && OCR_EXTS.has(ext) && ocrAvailable
+      if (!file.isImage && !isText && !canOcr) {
+        skipped.push({ name: file.name })
+        continue
+      }
+      if (!file.isImage && canOcr) {
+        if (file.size > MAX_DOCUMENT_BYTES) {
+          skipped.push({ name: file.name })
+          continue
+        }
+        const blob = await loadFile(file.id)
+        if (blob) {
+          await doOcr(file, blob)
+        } else {
+          skipped.push({ name: file.name })
+        }
+        continue
+      }
     }
+
+    // 原生模态处理：图片 → data URL；文本 → 正文
     if (file.isImage && file.size > MAX_IMAGE_BYTES) {
       skipped.push({ name: file.name })
       continue
@@ -159,7 +232,6 @@ export const inlineAttachments = async (
     }
     if (file.isImage) {
       const dataUrl = await toDataUrl(blob, file.mimeType || blob.type)
-      // 守 48 MiB 请求体：已经装下的继续，装不下的跳过并在提示里点名
       if (dataChars + dataUrl.length > MAX_INLINE_DATA_CHARS) {
         skipped.push({ name: file.name })
         continue
@@ -173,24 +245,9 @@ export const inlineAttachments = async (
       })
     } else if (isText) {
       inline.push({ kind: 'text', name: file.name, text: await blob.text() })
-    } else if (canOcr && options.ocrKey) {
-      try {
-        const text = await recognizeDocument(
-          options.ocrKey,
-          blob,
-          file.name,
-          'text_recognition',
-          options.signal
-        )
-        if (text.trim() === '') {
-          skipped.push({ name: file.name })
-        } else {
-          inline.push({ kind: 'text', name: file.name, text, source: 'ocr' })
-        }
-      } catch {
-        // OCR 失败不影响主请求，按未进入请求处理
-        skipped.push({ name: file.name })
-      }
+    } else {
+      // 能力模式下 native 的文档：OpenAI 协议无法直接内联，退回 OCR
+      await doOcr(file, blob)
     }
   }
   return { inline, skipped }
