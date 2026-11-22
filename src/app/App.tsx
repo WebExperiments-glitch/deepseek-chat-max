@@ -29,7 +29,9 @@ import { onUploadNotice } from '../services/attachments.js'
 import { onInlineNotice } from '../services/chat/inlineAttachments.js'
 import { Button } from '../components/base/Button.js'
 import { stopReadAloud } from '../services/speech/readAloud.js'
-import { initMemory } from '../services/memory/store.js'
+import { setLocale as setI18nLocale } from '../i18n/index.js'
+import { initMemory, setMemoryNotifier } from '../services/memory/store.js'
+import { webNotify } from '../adapters/web/notify.js'
 import { loadModelMeta } from '../services/modelMeta.js'
 import { loadModelCatalog } from '../services/modelCatalog.js'
 import { CollapsedSider } from '../components/sider/CollapsedSider.js'
@@ -157,6 +159,9 @@ export const App = () => {
   }, [ready])
 
   useEffect(() => {
+    // 组装根：注入平台适配器（核心层不依赖 UI/平台实现）
+    setI18nLocale(useSettings.getState().locale)
+    setMemoryNotifier(webNotify)
     void initChat()
     // 长期记忆随应用启动读入，请求前才能同步取到记忆块
     void initMemory()

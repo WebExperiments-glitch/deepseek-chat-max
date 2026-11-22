@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
-import { showToast } from '../../components/base/toastState.js'
+import type { NotifyPort } from '../../ports/index.js'
 import { getDeepseekApiKey, useSettings } from '../settings.js'
 import { selectMemories } from './assemble.js'
 import {
@@ -23,6 +23,15 @@ import {
   type MemoryKind,
   type MemoryView,
 } from './types.js'
+
+/**
+ * 通知端口：由组装根注入（Web 端桥接 toastState，iOS 端换原生提示）。
+ * 默认空操作，核心层不再 import 任何 UI 组件。
+ */
+let notify: NotifyPort = () => {}
+export const setMemoryNotifier = (port: NotifyPort): void => {
+  notify = port
+}
 
 /**
  * 长期记忆的状态与编排。
@@ -418,7 +427,7 @@ export const extractRoundMemory = async (
     }
     set({ entries })
     if (added + updated + deleted.length > 0) {
-      showToast({
+      notify({
         key: 'memoryUpdatedToast',
         params: { added, updated, deleted: deleted.length },
       })

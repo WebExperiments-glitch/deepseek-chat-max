@@ -29,6 +29,6 @@ export const createLatestReminder = (
     new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(now),
     locationName(location, locale),
     'Web',
-    translate('latestReminderLanguage'),
+    translate('latestReminderLanguage', undefined, locale),
   ].join(',')
 }

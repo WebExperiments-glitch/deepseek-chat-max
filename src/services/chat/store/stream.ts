@@ -390,7 +390,8 @@ export const compressCurrentSession = async (sessionId: string): Promise<Compres
   const outcome = await compressSession(
     session,
     getDeepseekApiKey(),
-    useSettings.getState().locale
+    useSettings.getState().locale,
+    compressionDeps(sessionId)
   )
   if (!outcome.ok) {
     return outcome
@@ -452,6 +453,15 @@ const applyLocalTitle = (sessionId: string, controller: AbortController, questio
     return
   }
   updateSession(sessionId, (session) => (session.title ? session : { ...session, title }))
+}
+
+/** 组装压缩所需的外部配置——编排层从全局取值注入，压缩核心保持纯算法 */
+const compressionDeps = (sessionId: string) => {
+  const s = useSettings.getState()
+  return {
+    systemPrompt: getActivePresetPrompt(sessionId) ?? s.customSystemPrompt,
+    toolsJson: s.toolsJson,
+  }
 }
 
 /**
@@ -765,7 +775,8 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
             const outcome = await compressSession(
               overflowSession,
               apiKey,
-              useSettings.getState().locale
+              useSettings.getState().locale,
+              compressionDeps(sessionId)
             )
             if (outcome.ok && !controller.signal.aborted && getSession(sessionId)) {
               updateSession(sessionId, (current) => ({

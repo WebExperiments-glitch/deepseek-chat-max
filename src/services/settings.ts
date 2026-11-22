@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { setLocale as setI18nLocale } from '../i18n/index.js'
 import type { TtsVoice } from './api/speech.js'
 import {
   getProvider,
@@ -456,6 +457,7 @@ export const getCurrentModel = (): string => {
 export const setLocale = (locale: Locale) => {
   write(KEYS.locale, locale)
   useSettings.setState({ locale })
+  setI18nLocale(locale)
 }
 
 export const setLocation = (value: UserLocation | null) => {

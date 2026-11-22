@@ -1,4 +1,4 @@
-import { useSettings } from '../services/settings.js'
+import { useSyncExternalStore } from 'react'
 import { en } from './en.js'
 import { zh } from './zh.js'
 
@@ -27,8 +27,41 @@ const translators = {
   'en-US': createTranslate(en),
 }
 
-/** 组件订阅语言变化；普通函数在调用时读取当前语言。 */
-export const useTranslate = () => useSettings((state) => translators[state.locale])
+/**
+ * 语言状态由 i18n 自己持有（端口），不再读 settings store——断开
+ * i18n → settings → speech → client → i18n 的循环依赖。
+ * settings 切换语言时调用 setLocale，两侧保持同步（见 bootstrap）。
+ */
+let currentLocale = 'zh-CN'
+const localeListeners = new Set<() => void>()
 
-export const translate = (key: TranslationKey, params?: TranslationParams): string =>
-  translators[useSettings.getState().locale](key, params)
+export const setLocale = (locale: string): void => {
+  const next = locale === 'en-US' ? 'en-US' : 'zh-CN'
+  if (next === currentLocale) {
+    return
+  }
+  currentLocale = next
+  for (const listener of localeListeners) {
+    listener()
+  }
+}
+
+export const getLocale = (): string => currentLocale
+
+const subscribeLocale = (listener: () => void): (() => void) => {
+  localeListeners.add(listener)
+  return () => localeListeners.delete(listener)
+}
+
+/** 组件订阅语言变化（React useSyncExternalStore，不依赖 zustand）。 */
+export const useTranslate = () => {
+  const locale = useSyncExternalStore(subscribeLocale, getLocale, getLocale)
+  return translators[locale as 'zh-CN' | 'en-US'] ?? translators['zh-CN']
+}
+
+export const translate = (
+  key: TranslationKey,
+  params?: TranslationParams,
+  locale?: string
+): string =>
+  translators[(locale ?? currentLocale) as 'zh-CN' | 'en-US'](key, params)

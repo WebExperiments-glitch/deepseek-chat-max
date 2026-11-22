@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { createId } from '../../../utils/id.js'
 import { getCurrentModel, useSettings } from '../../settings.js'
-import type { CreateMessageRequest } from '../../api/types.js'
 import * as db from '../db.js'
 import { settleReply } from '../reply.js'
 import {
@@ -11,28 +10,17 @@ import {
   type Session,
   type SessionSummary,
 } from '../types.js'
+// 纯请求配置已抽到 requestConfig.ts（零依赖）；这里 re-export 保持所有调用方兼容
+export {
+  DEFAULT_OUTPUT_RESERVE,
+  SAFETY_CHECK,
+  FILE_RETRY_LIMIT,
+  FILE_RETRY_BASE_DELAY,
+  serverTools,
+} from '../requestConfig.js'
 
-/** 未设置最大输出时，给压缩阈值预留的输出量（保守值，宁早压缩不晚压缩） */
-export const DEFAULT_OUTPUT_RESERVE = 8192
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 export const SESSION_CACHE_LIMIT = 5
-/** 安全审核固定开启，所有请求都走扩展模式 */
-export const SAFETY_CHECK = { level: 'high' } as const
-/** 服务端判定 file_id 失效后，重新补传并重发的最多次数（不含首次请求） */
-export const FILE_RETRY_LIMIT = 2
-/** 退避基数，第 n 次重试等待 2^n 倍；连续失败达到上限就放弃，把原始报错展示出来 */
-export const FILE_RETRY_BASE_DELAY = 1000
-
-/** 阅读链接始终开启，智能搜索开关控制是否另行声明搜索工具（含边想边搜）。 */
-export const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
-  const tools: CreateMessageRequest['tools'] = [
-    { type: 'deepseek_read_url', name: 'deepseek_read_url' },
-  ]
-  if (search) {
-    tools.push({ type: 'deepseek_web_search', name: 'deepseek_web_search' })
-  }
-  return tools
-}
 
 /** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
 export const titleRequests = new Set<AbortController>()

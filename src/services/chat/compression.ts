@@ -6,7 +6,7 @@ import { getVisibleMessages } from './branches.js'
 import { parseClientTools, toAnthropicTools } from './clientTools.js'
 import { reserveGeometry } from './contextPressure.js'
 import { toRequestMessages } from './reply.js'
-import { serverTools } from './store/state.js'
+import { serverTools } from './requestConfig.js'
 import { composeSystemPrompt } from './systemPrompt.js'
 import type {
   AssistantMessage,
@@ -103,18 +103,25 @@ const summaryModel = (lastReply: AssistantMessage | undefined): string =>
     ? lastReply.model
     : FALLBACK_SUMMARY_MODEL
 
+/** 压缩所需的外部配置（由调用方注入，核心不读全局状态） */
+export type CompressionDeps = {
+  /** 本会话已解析的系统提示词（预设或自定义），由调用方决定来源 */
+  systemPrompt: string
+  /** 自定义 tools 的 JSON 文本 */
+  toolsJson: string
+}
+
 /**
  * 构造摘要请求：system、工具与消息都按对话请求的方式重放。
  * withTools=false 用于模型误调工具、拿不到正文时的兜底重试。
  */
 const buildSummaryRequest = (
-  session: Session,
   target: Message[],
   locale: Locale,
   previousSummary: string | undefined,
-  withTools: boolean
+  withTools: boolean,
+  deps: CompressionDeps
 ): CreateMessageRequest => {
-  const settings = useSettings.getState()
   const lastReply = [...target].reverse().find(
     (message): message is AssistantMessage => message.role === 'assistant'
   )
@@ -125,12 +132,10 @@ const buildSummaryRequest = (
     files: [],
     createdAt: Date.now(),
   }
-  const clientTools = parseClientTools(settings.toolsJson)
+  const clientTools = parseClientTools(deps.toolsJson)
   return {
     model: summaryModel(lastReply),
-    system: composeSystemPrompt(
-      getActivePresetPrompt(session.id) ?? settings.customSystemPrompt
-    ),
+    system: composeSystemPrompt(deps.systemPrompt),
     messages: toRequestMessages(target, instruction, undefined, false),
     thinking: { type: 'disabled' },
     temperature: 0.3,
@@ -165,8 +170,14 @@ const collectText = async (
 export const compressSession = async (
   session: Session,
   apiKey: string,
-  locale: Locale
+  locale: Locale,
+  deps?: CompressionDeps
 ): Promise<CompressOutcome> => {
+  // 兼容未注入的调用方：默认从全局取一次（新代码应显式注入，核心保持纯粹）
+  const resolved: CompressionDeps = deps ?? {
+    systemPrompt: getActivePresetPrompt(session.id) ?? useSettings.getState().customSystemPrompt,
+    toolsJson: useSettings.getState().toolsJson,
+  }
   if (!apiKey) {
     return { ok: false, reason: 'noKey' }
   }
@@ -195,13 +206,13 @@ export const compressSession = async (
     // 第一次带工具，尽量与对话请求逐字一致；模型若误调工具、没有正文，再去掉工具重试
     let summary = await collectText(
       apiKey,
-      buildSummaryRequest(session, target, locale, session.compression?.summary, true),
+      buildSummaryRequest(target, locale, session.compression?.summary, true, resolved),
       controller.signal
     )
     if (summary === '') {
       summary = await collectText(
         apiKey,
-        buildSummaryRequest(session, target, locale, session.compression?.summary, false),
+        buildSummaryRequest(target, locale, session.compression?.summary, false, resolved),
         controller.signal
       )
     }
