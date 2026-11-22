@@ -1,0 +1,57 @@
+name: CodeQL
+
+# 静态安全分析： push(main) / PR / 每周定时 / 手动触发。
+# 与 ci.yml 的质量门禁并行，互不阻塞；结果上传到 GitHub Security 面板。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # UTC 每周一 18:00 = 北京时间周二 02:00，低峰期跑全量扫描。
+    - cron: '0 18 * * 1'
+  workflow_dispatch:
+
+# CodeQL 需要写安全事件；读 actions 用于解析依赖的 action 元数据。
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    # fork 的 PR 拿到的是只读 token，没有 security-events:write，上传结果必然失败；
+    # 这类 PR 跳过 CodeQL（同仓库 PR 正常跑），避免出现必然红灯。
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        # 本项目是 TypeScript/JavaScript 工程：前端 React + Node 本机服务，
+        # 仓库里没有 Python/C/C++/Java 等代码。只跑 javascript-typescript 一种语言，
+        # 避免为不存在的语言初始化分析器、白白浪费 runner 时间和额度。
+        language: ['javascript-typescript']
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # JS/TS 由 CodeQL 自带提取器解析，不需要 pnpm install / build / autobuild。
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
+        with:
+          category: '/language:${{ matrix.language }}'

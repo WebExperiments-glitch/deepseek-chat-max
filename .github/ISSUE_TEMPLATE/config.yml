@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/WebExperiments-glitch/deepseek-chat-max/security/advisories/new
+    about: 请私下报告安全漏洞，不要公开开 Issue（见 SECURITY.md）
+  - name: 使用问题 / 讨论
+    url: https://github.com/WebExperiments-glitch/deepseek-chat-max/discussions
+    about: 用法咨询、功能建议请在 Discussions 讨论

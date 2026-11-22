@@ -1,0 +1,43 @@
+version: 2
+updates:
+  # npm 依赖：每周一（北京时间）只接受 minor / patch，major 升级走人工评估。
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    # major 通常带破坏性变更，不自动开 PR；minor/patch 合并成一组减少噪音。
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    commit-message:
+      prefix: deps
+    groups:
+      npm-minor:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions 也要升级：action 本身会过期——可能有安全补丁（如 checkout / CodeQL）、
+  # Node 运行时升级或 API 变更。长期停在旧 commit 等于带着已知漏洞跑 CI。
+  # 本仓库所有 action 都用完整 SHA 锁定，Dependabot 会把「版本注释 + SHA」一起更新成 PR，
+  # 人工 review 后合并即可，既不失控也不会漏掉安全修复。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - '*'

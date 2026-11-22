@@ -1,0 +1,37 @@
+name: Stale issues & PRs
+
+permissions:
+  issues: write
+  pull-requests: write
+
+on:
+  schedule:
+    - cron: '23 2 * * *'   # 每天 10:23 Asia/Shanghai
+  workflow_dispatch:
+
+concurrency:
+  group: stale
+  cancel-in-progress: true
+
+# 机器人：长期无响应的 issue / PR 先打标记、再关闭。
+# 不设 auto-merge——合并必须走人审 + 必需检查（见 CONTRIBUTING.md）。
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Mark and close stale
+        uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: 60
+          days-before-close: 14
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: 'pinned,security,bug-confirmed'
+          exempt-pr-labels: 'pinned,security'
+          stale-issue-message: '这个 issue 60 天没有新活动，已标记为 stale；14 天内无回复将自动关闭。若仍相关请留言。'
+          stale-pr-message: '这个 PR 60 天没有新活动，已标记为 stale；14 天内无回复将自动关闭。'
+          close-issue-message: '因长期无活动自动关闭。'
+          close-pr-message: '因长期无活动自动关闭。'
+          operations-per-run: 100

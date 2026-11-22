@@ -1,0 +1,144 @@
+name: E2E (nightly smoke)
+
+# 浏览器冒烟：只走夜间定时 + 手动触发，不绑定 push/PR，避免拖慢日常 PR 反馈。
+on:
+  schedule:
+    # 每天 UTC 18:00 = 北京时间次日 02:00，低峰期跑。
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e
+  # 夜间任务不取消正在跑的实例，避免半途掐断服务和浏览器。
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # 真实 API 脚本需要密钥；在 step 的 if 里判断，避免没配密钥时必然失败。
+      HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 10.26.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 本机服务直接托管 dist/，所以必须先 build 再 start。
+      - name: Build
+        run: pnpm build
+
+      # 主服务：默认 127.0.0.1:8787，日志留到失败时排查。
+      - name: Start local server
+        run: |
+          PORT=8787 pnpm start > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+
+      # 等 /api/health 就绪，避免浏览器脚本打到还没起来的服务。
+      - name: Wait for /api/health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/api/health > /dev/null; then
+              echo 'server ready'
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'server not ready' >&2
+          cat "$RUNNER_TEMP/server.log" >&2
+          exit 1
+
+      # ui-shot.mjs 内部把 URL 写死为 http://localhost:8090/，脚本入参改不了 URL；
+      # 所以在 8090 再起一个实例（同一份 dist/DB，只读为主），直接复用脚本不改它。
+      - name: Start screenshot server (8090)
+        run: |
+          PORT=8090 pnpm start > "$RUNNER_TEMP/server-8090.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server-8090.pid"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8090/api/health > /dev/null; then
+              echo 'screenshot server ready'
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'screenshot server not ready' >&2
+          cat "$RUNNER_TEMP/server-8090.log" >&2
+          exit 1
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          chrome-version: stable
+
+      # 无头模式 + CDP 远程调试端口 9336，供下面两个脚本连接。
+      - name: Launch headless Chrome with CDP
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          "$CHROME_PATH" --headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu \
+            --window-size=1280,800 --remote-debugging-port=9336 \
+            --user-data-dir="$RUNNER_TEMP/chrome-profile" \
+            about:blank > "$RUNNER_TEMP/chrome.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/chrome.pid"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9336/json/version > /dev/null; then
+              echo 'chrome CDP ready'
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'chrome CDP not ready' >&2
+          cat "$RUNNER_TEMP/chrome.log" >&2
+          exit 1
+
+      # console-check.mjs 入参：[CDP 端口] [要打开的 URL]；指向 8787 主服务，
+      # 捕获页面上的 error/warning 与未捕获异常。
+      - name: Console smoke check
+        run: node scripts/console-check.mjs 9336 http://127.0.0.1:8787/
+
+      # ui-shot.mjs 入参：[CDP 端口] [输出路径]；内部写死导航到 8090，故上面起了 8090 实例。
+      # 复用同一个 CDP 端口 9336，它会注入测试 localStorage 后刷新并截图。
+      - name: UI screenshot
+        run: node scripts/ui-shot.mjs 9336 "$RUNNER_TEMP/ui-shot.png"
+
+      - name: Upload UI screenshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-shot
+          path: ${{ runner.temp }}/ui-shot.png
+          if-no-files-found: warn
+
+      # 这两个脚本直接请求 https://api.deepseek.com，需要密钥且会产生费用；
+      # 只有配置了 DEEPSEEK_API_KEY 才跑，避免没有 key 时脚本 exit(2) 导致必然红灯。
+      - name: Real API verification (only when key configured)
+        if: ${{ env.HAS_DEEPSEEK_KEY == 'true' }}
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          node scripts/verify-api.mjs
+          node scripts/verify-webapi.mjs
+
+      # 无论成败都打印服务/Chrome 日志，方便定位冒烟失败原因。
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo '--- server.log ---'; cat "$RUNNER_TEMP/server.log" || true
+          echo '--- server-8090.log ---'; cat "$RUNNER_TEMP/server-8090.log" || true
+          echo '--- chrome.log ---'; cat "$RUNNER_TEMP/chrome.log" || true

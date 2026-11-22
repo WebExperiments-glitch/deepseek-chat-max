@@ -1,0 +1,23 @@
+# CODEOWNERS —— 关键路径的强制 reviewer
+# 说明：这些路径的改动需要对应 owner review（需在仓库 Settings → Branches 开启
+# "Require review from Code Owners" 才生效）。用占位 owner（仓库所有者）保证
+# 现在就有意义；将来按模块分工可替换为具体团队。
+# 规则：最后一条匹配的规则生效。
+
+# 默认：所有文件由仓库所有者把关
+*       @WebExperiments-glitch
+
+# 服务端与安全：鉴权 / 脱敏 / 代理，改动风险最高
+/server/             @WebExperiments-glitch
+/src/services/api/   @WebExperiments-glitch
+/src/ports/          @WebExperiments-glitch
+
+# CI / 流水线 / 依赖：公共资产
+/.github/            @WebExperiments-glitch
+/scripts/            @WebExperiments-glitch
+/package.json        @WebExperiments-glitch
+/pnpm-lock.yaml      @WebExperiments-glitch
+
+# 核心对话链路：前缀稳定性 / 压缩 / 记忆
+/src/services/chat/  @WebExperiments-glitch
+/src/stores/         @WebExperiments-glitch

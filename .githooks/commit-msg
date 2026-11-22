@@ -1,0 +1,34 @@
+#!/bin/sh
+# ============================================================
+# commit-msg —— 给每条提交补上 AI 协作署名
+# ============================================================
+# 安装：git config core.hooksPath .githooks   （仓库根执行一次）
+# 绕过：git commit --no-verify（不推荐）
+#
+# 【为什么用钩子而不是靠自觉】
+#   凡是"记得就加、忘了就没有"的约定，最后一定会丢。署名是
+#   「谁在和你一起写这个仓库」的唯一记录，交给钩子最稳。
+# ============================================================
+set -e
+
+MSG_FILE="$1"
+TRAILER="Co-authored-by: OpenCode Agent <agent@local>"
+
+[ -f "$MSG_FILE" ] || exit 0
+
+# 合并提交不加：它没有独立改动内容，署名只会变成噪音
+if grep -qE '^Merge (branch|remote-tracking|pull request)' "$MSG_FILE"; then
+  exit 0
+fi
+
+# 已经写过就别重复（幂等 —— amend/rebase 都会再跑一遍）
+if grep -qiE "^Co-authored-by: *OpenCode Agent( |<|$)" "$MSG_FILE"; then
+  exit 0
+fi
+
+# 空行后追加 trailer（符合 git trailer 约定）
+LAST_LINE=$(tail -n 1 "$MSG_FILE")
+if [ -n "$LAST_LINE" ]; then
+  printf '\n' >> "$MSG_FILE"
+fi
+printf '%s\n' "$TRAILER" >> "$MSG_FILE"
