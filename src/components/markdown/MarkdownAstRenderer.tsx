@@ -2,7 +2,7 @@ import { createElement, memo, useLayoutEffect, useMemo, useRef, type ReactNode }
 import clsx from 'clsx'
 import type {
   BlockContent,
-  Blockquote,
+  Blockquote as BlockquoteNode,
   DefinitionContent,
   List as ListNode,
   Paragraph,
@@ -74,7 +74,7 @@ const phrasingText = (nodes: PhrasingContent[]): string =>
 type AlertKind = 'note' | 'tip' | 'important' | 'warning' | 'caution'
 
 /** GitHub 风格提示块：> [!NOTE] 开头 */
-const readAlert = (node: Blockquote): {
+const readAlert = (node: BlockquoteNode): {
   kind: AlertKind
   children: Array<BlockContent | DefinitionContent>
 } | null => {
@@ -117,7 +117,7 @@ const Blockquote = memo(function Blockquote({
   node,
   loading,
 }: {
-  node: Blockquote
+  node: BlockquoteNode
   loading: boolean
 }) {
   const t = useTranslate()
