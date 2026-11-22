@@ -8,14 +8,17 @@ import {
   filterModels,
   sortModels,
 } from '../../services/modelPicker.js'
+import { groupByProvider, latestPerFamily, pinSections, type ModelGroup } from '../../services/modelGroups.js'
 import { pushRecent, toggleFavorite, useModelPrefs } from '../../services/modelPrefs.js'
 import { setProviderModel, useSettings } from '../../services/settings.js'
 import { useTranslate, type TranslationKey } from '../../i18n/index.js'
 import { showToast } from '../base/toastState.js'
+import { Tooltip } from '../base/Tooltip.js'
 import styles from './ModelPicker.module.css'
 
 type PriceFilter = 'any' | 'free' | 'under1' | 'under5' | 'over5'
 type ContextFilter = 'any' | 'under128k' | '1m' | 'over1m'
+type ViewMode = 'grouped' | 'grid'
 
 const PRICE_RANGES: Record<Exclude<PriceFilter, 'any' | 'free'>, [number, number]> = {
   under1: [0, 1],
@@ -35,7 +38,12 @@ const fmtContext = (v: number | undefined): string =>
 const modalityShort = (m: string): string =>
   ({ text: '文', image: '图', audio: '音', video: '视', pdf: 'PDF' })[m] ?? m
 
-/** 设置页里的专门「模型」分组：电商式选型器 */
+const tr = (t: (k: TranslationKey) => string, key: TranslationKey, fallback: string): string => {
+  const value = t(key)
+  return value === key ? fallback : value
+}
+
+/** 设置页里的专门「模型」分组：电商式选型 + OpenCode/DSH 分组选择交互 */
 export const ModelPicker = () => {
   const t = useTranslate()
   const provider = useSettings((state) => state.provider)
@@ -53,7 +61,11 @@ export const ModelPicker = () => {
   const [reasoning, setReasoning] = useState(false)
   const [tools, setTools] = useState(false)
   const [sort, setSort] = useState<SortKey>('default')
+  const [view, setView] = useState<ViewMode>('grouped')
+  const [latestOnly, setLatestOnly] = useState(true)
   const [compareIds, setCompareIds] = useState<string[]>([])
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     void loadModelCatalog()
@@ -84,30 +96,47 @@ export const ModelPicker = () => {
     return f
   }, [text, price, context, textOnly, video, reasoning, tools])
 
-  // 候选池：有筛选条件时从全目录筛；否则把收藏/最近置顶展示
-  const matched = useMemo(() => {
-    const hasFilter =
-      !!text.trim() || price !== 'any' || context !== 'any' || textOnly || video ||
-      reasoning || tools
-    const pool = hasFilter ? catalog : pinFavorites(catalog, favorites, recent)
-    return sortModels(filterModels(pool, filter), sort)
-  }, [catalog, favorites, recent, filter, sort, text, price, context, textOnly, video, reasoning, tools])
-  const results = matched.slice(0, 200)
-  const total = matched.length
+  const hasFilter =
+    !!text.trim() || price !== 'any' || context !== 'any' || textOnly || video ||
+    reasoning || tools
 
-  const compared = useMemo(
-    () => compareModels(catalog, compareIds),
-    [catalog, compareIds]
-  )
+  const matched = useMemo(() => {
+    let pool = hasFilter ? catalog : catalog
+    if (latestOnly && !hasFilter) {
+      pool = latestPerFamily(pool)
+    }
+    return sortModels(filterModels(pool, filter), sort)
+  }, [catalog, filter, sort, hasFilter, latestOnly])
+
+  const total = matched.length
+  const shown = matched.slice(0, 300)
+
+  const compared = useMemo(() => compareModels(catalog, compareIds), [catalog, compareIds])
+
+  // 分组视图：收藏 / 最近置顶（仅无筛选时），其余按服务商分组；搜索时展平
+  const sections = useMemo(() => {
+    if (view !== 'grouped' || hasFilter) {
+      return []
+    }
+    return pinSections(shown, favorites, recent)
+  }, [view, hasFilter, shown, favorites, recent])
+
+  const groups = useMemo<ModelGroup[]>(() => {
+    if (view !== 'grouped') {
+      return []
+    }
+    const pinnedIds = new Set(sections.flatMap((s) => s.models.map((m) => m.id)))
+    const rest = hasFilter ? shown : shown.filter((m) => !pinnedIds.has(m.id))
+    return groupByProvider(rest)
+  }, [view, hasFilter, shown, sections])
 
   const choose = (model: CatalogModel) => {
     setProviderModel(provider, model.modelId)
     pushRecent(model.id)
     if (model.providerId !== provider) {
-      // 模型来自别的服务商：id 可能对当前服务商无效，明确提示用户切换
-      showToast(`${model.name}（${model.providerName}）· 请切换到对应服务商后使用`)
+      showToast(`${model.name}（${model.providerName}）· ${tr(t, 'modelPickerSwitchProviderHint', '请切换到对应服务商后使用')}`)
     } else {
-      showToast(t('modelPickerSelected') + ': ' + model.name)
+      showToast(tr(t, 'modelPickerSelected', '当前使用') + ': ' + model.name)
     }
   }
 
@@ -117,74 +146,143 @@ export const ModelPicker = () => {
     )
   }
 
-  const label = (key: TranslationKey, fallback: string) => {
-    const value = t(key)
-    return value === key ? fallback : value
+  // Mod+F 收藏当前聚焦（最后点选）的模型，抄 OpenCode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && focusId) {
+        e.preventDefault()
+        toggleFavorite(focusId)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusId])
+
+  const toggleGroup = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }
+
+  const rowProps = (m: CatalogModel) => ({
+    model: m,
+    active: m.modelId === savedModel && m.providerId === provider,
+    favorite: favorites.includes(m.id),
+    comparing: compareIds.includes(m.id),
+    onChoose: () => {
+      setFocusId(m.id)
+      choose(m)
+    },
+    onFavorite: () => toggleFavorite(m.id),
+    onCompare: () => toggleCompare(m.id),
+  })
 
   return (
     <div className={styles.root}>
-      <div className={styles.intro}>{label('modelPickerIntro', '从上万个模型中筛选，挑一个最适合你的。')}</div>
+      <div className={styles.intro}>{tr(t, 'modelPickerIntro', '从上万个模型中按价格、上下文、能力筛选，挑一个最适合你的。数据来自公开模型库，每天更新。')}</div>
 
-      <input
-        className={styles.search}
-        placeholder={label('modelPickerSearchPlaceholder', '搜索模型名称、ID 或服务商')}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
+      <div className={styles.searchRow}>
+        <input
+          className={styles.search}
+          placeholder={tr(t, 'modelPickerSearchPlaceholder', '搜索模型名称、ID 或服务商')}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className={styles.viewToggle}>
+          <button type="button" className={view === 'grouped' ? styles.viewBtnActive : styles.viewBtn} onClick={() => setView('grouped')}>
+            {tr(t, 'modelPickerViewGrouped', '分组')}
+          </button>
+          <button type="button" className={view === 'grid' ? styles.viewBtnActive : styles.viewBtn} onClick={() => setView('grid')}>
+            {tr(t, 'modelPickerViewGrid', '卡片')}
+          </button>
+        </div>
+      </div>
 
       <div className={styles.facets}>
-        <Facet label={label('modelPickerPrice', '输入价格')}>
-          <Chip active={price === 'any'} onClick={() => setPrice('any')}>{label('modelPickerPriceAny', '不限')}</Chip>
-          <Chip active={price === 'free'} onClick={() => setPrice('free')}>{label('modelPickerPriceFree', '免费')}</Chip>
-          <Chip active={price === 'under1'} onClick={() => setPrice('under1')}>{label('modelPickerPriceUnder1', '低于 $1')}</Chip>
-          <Chip active={price === 'under5'} onClick={() => setPrice('under5')}>{label('modelPickerPriceUnder5', '低于 $5')}</Chip>
-          <Chip active={price === 'over5'} onClick={() => setPrice('over5')}>{label('modelPickerPriceOver5', '$5 以上')}</Chip>
+        <Facet label={tr(t, 'modelPickerPrice', '输入价格')}>
+          <Chip active={price === 'any'} onClick={() => setPrice('any')}>{tr(t, 'modelPickerPriceAny', '不限')}</Chip>
+          <Chip active={price === 'free'} onClick={() => setPrice('free')}>{tr(t, 'modelPickerPriceFree', '免费')}</Chip>
+          <Chip active={price === 'under1'} onClick={() => setPrice('under1')}>{tr(t, 'modelPickerPriceUnder1', '低于 $1')}</Chip>
+          <Chip active={price === 'under5'} onClick={() => setPrice('under5')}>{tr(t, 'modelPickerPriceUnder5', '低于 $5')}</Chip>
+          <Chip active={price === 'over5'} onClick={() => setPrice('over5')}>{tr(t, 'modelPickerPriceOver5', '$5 以上')}</Chip>
         </Facet>
-        <Facet label={label('modelPickerContext', '上下文窗口')}>
-          <Chip active={context === 'any'} onClick={() => setContext('any')}>{label('modelPickerContextAny', '不限')}</Chip>
-          <Chip active={context === 'under128k'} onClick={() => setContext('under128k')}>{label('modelPickerContext128k', '128K 以下')}</Chip>
-          <Chip active={context === '1m'} onClick={() => setContext('1m')}>{label('modelPickerContext1m', '128K–1M')}</Chip>
-          <Chip active={context === 'over1m'} onClick={() => setContext('over1m')}>{label('modelPickerContextBig', '1M 以上')}</Chip>
+        <Facet label={tr(t, 'modelPickerContext', '上下文窗口')}>
+          <Chip active={context === 'any'} onClick={() => setContext('any')}>{tr(t, 'modelPickerContextAny', '不限')}</Chip>
+          <Chip active={context === 'under128k'} onClick={() => setContext('under128k')}>{tr(t, 'modelPickerContext128k', '128K 以下')}</Chip>
+          <Chip active={context === '1m'} onClick={() => setContext('1m')}>{tr(t, 'modelPickerContext1m', '128K–1M')}</Chip>
+          <Chip active={context === 'over1m'} onClick={() => setContext('over1m')}>{tr(t, 'modelPickerContextBig', '1M 以上')}</Chip>
         </Facet>
-        <Facet label={label('modelPickerModality', '输出模态')}>
-          <Chip active={textOnly} onClick={() => setTextOnly(!textOnly)}>{label('modelPickerTextOnly', '纯文本')}</Chip>
-          <Chip active={video} onClick={() => setVideo(!video)}>{label('modelPickerVideo', '视频')}</Chip>
-          <Chip active={reasoning} onClick={() => setReasoning(!reasoning)}>{label('modelPickerReasoning', '支持推理')}</Chip>
-          <Chip active={tools} onClick={() => setTools(!tools)}>{label('modelPickerTools', '支持工具')}</Chip>
+        <Facet label={tr(t, 'modelPickerModality', '输出模态')}>
+          <Chip active={textOnly} onClick={() => setTextOnly(!textOnly)}>{tr(t, 'modelPickerTextOnly', '纯文本')}</Chip>
+          <Chip active={video} onClick={() => setVideo(!video)}>{tr(t, 'modelPickerVideo', '视频')}</Chip>
+          <Chip active={reasoning} onClick={() => setReasoning(!reasoning)}>{tr(t, 'modelPickerReasoning', '支持推理')}</Chip>
+          <Chip active={tools} onClick={() => setTools(!tools)}>{tr(t, 'modelPickerTools', '支持工具')}</Chip>
         </Facet>
       </div>
 
       <div className={styles.listHead}>
-        <span>{loading ? label('modelPickerLoading', '正在加载模型目录...') : label('modelPickerResultCount', '共 {count} 个模型').replace('{count}', String(total))}</span>
-        <label className={styles.sort}>
-          {label('modelPickerSort', '排序')}
-          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-            <option value="default">{label('modelPickerSortDefault', '默认')}</option>
-            <option value="price-asc">{label('modelPickerSortPriceAsc', '价格从低到高')}</option>
-            <option value="price-desc">{label('modelPickerSortPriceDesc', '价格从高到低')}</option>
-            <option value="context-desc">{label('modelPickerSortContext', '上下文从大到小')}</option>
-            <option value="released-desc">{label('modelPickerSortReleased', '最新发布')}</option>
-            <option value="name-asc">{label('modelPickerSortName', '名称')}</option>
-          </select>
-        </label>
+        <span>
+          {loading
+            ? tr(t, 'modelPickerLoading', '正在加载模型目录...')
+            : tr(t, 'modelPickerResultCount', '共 {count} 个模型').replace('{count}', String(total))}
+        </span>
+        <div className={styles.listControls}>
+          <label className={styles.latestToggle}>
+            <input type="checkbox" checked={latestOnly} onChange={(e) => setLatestOnly(e.target.checked)} disabled={hasFilter} />
+            {tr(t, 'modelPickerLatestOnly', '仅最新')}
+          </label>
+          <label className={styles.sort}>
+            {tr(t, 'modelPickerSort', '排序')}
+            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+              <option value="default">{tr(t, 'modelPickerSortDefault', '默认')}</option>
+              <option value="price-asc">{tr(t, 'modelPickerSortPriceAsc', '价格从低到高')}</option>
+              <option value="price-desc">{tr(t, 'modelPickerSortPriceDesc', '价格从高到低')}</option>
+              <option value="context-desc">{tr(t, 'modelPickerSortContext', '上下文从大到小')}</option>
+              <option value="released-desc">{tr(t, 'modelPickerSortReleased', '最新发布')}</option>
+              <option value="name-asc">{tr(t, 'modelPickerSortName', '名称')}</option>
+            </select>
+          </label>
+        </div>
       </div>
 
-      <div className={styles.list}>
-        {results.map((m) => (
-          <ModelCard
-            key={m.id}
-            model={m}
-            active={m.modelId === savedModel && m.providerId === provider}
-            favorite={favorites.includes(m.id)}
-            comparing={compareIds.includes(m.id)}
-            onChoose={() => choose(m)}
-            onFavorite={() => toggleFavorite(m.id)}
-            onCompare={() => toggleCompare(m.id)}
-          />
-        ))}
-        {!loading && results.length === 0 ? (
-          <div className={styles.empty}>{label('modelPickerEmpty', '没有符合条件的模型，试试放宽筛选')}</div>
+      <div className={view === 'grid' ? styles.listGrid : styles.list}>
+        {view === 'grouped' ? (
+          <>
+            {sections.map((section) => (
+              <div key={section.section} className={styles.group}>
+                <div className={styles.groupTitle}>
+                  {section.section === 'favorite'
+                    ? tr(t, 'modelPickerFavorites', '我的收藏')
+                    : tr(t, 'modelPickerRecent', '最近使用')}
+                  <span className={styles.groupCount}>{section.models.length}</span>
+                </div>
+                {section.models.map((m) => <ModelRow key={m.id} {...rowProps(m)} />)}
+              </div>
+            ))}
+            {groups.map((group) => (
+              <div key={group.id} className={styles.group}>
+                <button type="button" className={styles.groupTitle} onClick={() => toggleGroup(group.id)}>
+                  <span className={collapsed.has(group.id) ? styles.chevronCollapsed : styles.chevron}>▾</span>
+                  {group.name}
+                  <span className={styles.groupCount}>{group.models.length}</span>
+                </button>
+                {!collapsed.has(group.id)
+                  ? group.models.map((m) => <ModelRow key={m.id} {...rowProps(m)} />)
+                  : null}
+              </div>
+            ))}
+          </>
+        ) : (
+          shown.map((m) => <ModelCard key={m.id} {...rowProps(m)} />)
+        )}
+        {!loading && shown.length === 0 ? (
+          <div className={styles.empty}>{tr(t, 'modelPickerEmpty', '没有符合条件的模型，试试放宽筛选')}</div>
         ) : null}
       </div>
 
@@ -192,23 +290,9 @@ export const ModelPicker = () => {
         <CompareTable models={compared} onClear={() => setCompareIds([])} />
       ) : null}
 
-      <div className={styles.note}>{label('modelPickerDataNote', '数据来自 models.dev（MIT），浏览器直连实时更新；无法获取时使用缓存。')}</div>
+      <div className={styles.note}>{tr(t, 'modelPickerDataNote', '数据来自 models.dev（MIT），浏览器直连实时更新；无法获取时使用缓存。')}</div>
     </div>
   )
-}
-
-/** 把收藏/最近的模型置顶（无筛选条件时），借鉴 OpenCode 的 Favorites/Recent 分组 */
-function pinFavorites(
-  catalog: CatalogModel[],
-  favorites: string[],
-  recent: string[]
-): CatalogModel[] {
-  const byId = new Map(catalog.map((m) => [m.id, m]))
-  const pinned = [...new Set([...favorites, ...recent])]
-    .map((id) => byId.get(id))
-    .filter((m): m is CatalogModel => !!m)
-  const rest = catalog.filter((m) => !pinned.includes(m))
-  return [...pinned, ...rest]
 }
 
 function Facet({ label, children }: { label: string; children: React.ReactNode }) {
@@ -228,15 +312,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   )
 }
 
-function ModelCard({
-  model,
-  active,
-  favorite,
-  comparing,
-  onChoose,
-  onFavorite,
-  onCompare,
-}: {
+type RowProps = {
   model: CatalogModel
   active: boolean
   favorite: boolean
@@ -244,44 +320,88 @@ function ModelCard({
   onChoose: () => void
   onFavorite: () => void
   onCompare: () => void
-}) {
+}
+
+/** 模型详情 tooltip（抄 OpenCode tooltip：上下文/输入输出/模态/推理/工具） */
+function ModelTooltip({ model }: { model: CatalogModel }) {
   const t = useTranslate()
-  const label = (key: TranslationKey, fallback: string) => {
-    const value = t(key)
-    return value === key ? fallback : value
-  }
+  return (
+    <div className={styles.tooltip}>
+      <div className={styles.tooltipTitle}>{model.name}</div>
+      <div className={styles.tooltipId}>{model.providerId}/{model.modelId}</div>
+      <div className={styles.tooltipGrid}>
+        <span>{tr(t, 'modelPickerPriceColumn', '价格(入/出)')}</span>
+        <span>{fmtPrice(model.cost?.input)} / {fmtPrice(model.cost?.output)}</span>
+        <span>{tr(t, 'modelPickerContextColumn', '上下文')}</span>
+        <span>{fmtContext(model.contextWindow)}</span>
+        <span>{tr(t, 'modelPickerSortReleased', '发布')}</span>
+        <span>{model.releaseDate ?? '—'}</span>
+        <span>{tr(t, 'modelPickerModalColumn', '输入/输出')}</span>
+        <span>{model.inputModalities.map(modalityShort).join('')} → {model.outputModalities.map(modalityShort).join('')}</span>
+        <span>{tr(t, 'modelPickerCapColumn', '能力')}</span>
+        <span>{[model.capabilities.reasoning ? tr(t, 'modelPickerReasoning', '推理') : '', model.capabilities.tools ? tr(t, 'modelPickerTools', '工具') : ''].filter(Boolean).join(' · ') || '—'}</span>
+      </div>
+    </div>
+  )
+}
+
+/** 紧凑模型行（OpenCode/DSH 选择器风格） */
+function ModelRow({ model, active, favorite, comparing, onChoose, onFavorite, onCompare }: RowProps) {
+  const t = useTranslate()
+  const free = isFree(model)
+  return (
+    <Tooltip content={<ModelTooltip model={model} />}>
+      <div className={active ? styles.rowActive : styles.row}>
+        <button type="button" className={styles.rowMain} onClick={onChoose}>
+          <span className={styles.rowName}>
+            {model.name}
+            {free ? <span className={styles.freeBadge}>{tr(t, 'modelPickerFreeBadge', '免费')}</span> : null}
+          </span>
+          <span className={styles.rowMeta}>
+            {fmtPrice(model.cost?.input)} · {fmtContext(model.contextWindow)}
+            {model.outputModalities.map((m) => <span key={m} className={styles.modality}>{modalityShort(m)}</span>)}
+          </span>
+        </button>
+        <button type="button" className={styles.iconBtn} onClick={onFavorite} title={favorite ? tr(t, 'modelPickerUnfavorite', '取消收藏') : tr(t, 'modelPickerFavorite', '收藏')}>
+          {favorite ? '★' : '☆'}
+        </button>
+        <button type="button" className={comparing ? styles.iconBtnActive : styles.iconBtn} onClick={onCompare}>
+          {tr(t, 'modelPickerCompare', '对比')}
+        </button>
+      </div>
+    </Tooltip>
+  )
+}
+
+/** 卡片视图（电商式，保留） */
+function ModelCard({ model, active, favorite, comparing, onChoose, onFavorite, onCompare }: RowProps) {
+  const t = useTranslate()
   const free = isFree(model)
   return (
     <div className={active ? styles.cardActive : styles.card}>
-      <div className={styles.cardTop}>
-        <div className={styles.cardName} title={model.id}>
-          {model.name}
-          {free ? <span className={styles.freeBadge}>{label('modelPickerFreeBadge', '免费')}</span> : null}
+      <Tooltip content={<ModelTooltip model={model} />}>
+        <div className={styles.cardTop}>
+          <div className={styles.cardName} title={model.id}>
+            {model.name}
+            {free ? <span className={styles.freeBadge}>{tr(t, 'modelPickerFreeBadge', '免费')}</span> : null}
+          </div>
+          <div className={styles.cardProvider}>{model.providerName}</div>
         </div>
-        <div className={styles.cardProvider}>{model.providerName}</div>
-      </div>
+      </Tooltip>
       <div className={styles.cardMeta}>
-        <span title={label('modelPickerPriceColumn', '价格')}>
-          {fmtPrice(model.cost?.input)} / {fmtPrice(model.cost?.output)}
-        </span>
-        <span title={label('modelPickerContextColumn', '上下文')}>{fmtContext(model.contextWindow)}</span>
-        <span className={styles.modalities}>
-          {model.outputModalities.map((m) => (
-            <span key={m} className={styles.modality}>{modalityShort(m)}</span>
-          ))}
-        </span>
+        <span>{fmtPrice(model.cost?.input)} / {fmtPrice(model.cost?.output)}</span>
+        <span>{fmtContext(model.contextWindow)}</span>
+        {model.outputModalities.map((m) => <span key={m} className={styles.modality}>{modalityShort(m)}</span>)}
         {model.capabilities.reasoning ? <span className={styles.cap}>推理</span> : null}
         {model.capabilities.tools ? <span className={styles.cap}>工具</span> : null}
       </div>
       <div className={styles.cardActions}>
         <button type="button" className={styles.choose} onClick={onChoose}>
-          {active ? label('modelPickerSelected', '当前使用') : label('modelPickerSelect', '选用')}
+          {active ? tr(t, 'modelPickerSelected', '当前使用') : tr(t, 'modelPickerSelect', '选用')}
         </button>
-        <button type="button" className={styles.iconBtn} onClick={onFavorite} title={favorite ? label('modelPickerUnfavorite', '取消收藏') : label('modelPickerFavorite', '收藏')}>
-          {favorite ? '★' : '☆'}
-        </button>
+        <button type="button" className={styles.iconBtn} onClick={onFavorite}>{favorite ? '★' : '☆'}</button>
         <button type="button" className={comparing ? styles.iconBtnActive : styles.iconBtn} onClick={onCompare}>
-          {label('modelPickerCompare', '对比')}
+          {tr(t, 'modelPickerCompare', '对比')}
         </button>
       </div>
     </div>
@@ -290,21 +410,17 @@ function ModelCard({
 
 function CompareTable({ models, onClear }: { models: CatalogModel[]; onClear: () => void }) {
   const t = useTranslate()
-  const label = (key: TranslationKey, fallback: string) => {
-    const value = t(key)
-    return value === key ? fallback : value
-  }
   const rows = [
-    { label: label('modelPickerPriceColumn', '价格（输入/输出）'), values: models.map((m) => `${fmtPrice(m.cost?.input)} / ${fmtPrice(m.cost?.output)}`) },
-    { label: label('modelPickerContextColumn', '上下文'), values: models.map((m) => fmtContext(m.contextWindow)) },
-    { label: label('modelPickerModalColumn', '输出模态'), values: models.map((m) => m.outputModalities.map(modalityShort).join(' ')) },
-    { label: label('modelPickerCapColumn', '能力'), values: models.map((m) => [m.capabilities.reasoning ? '推理' : '', m.capabilities.tools ? '工具' : ''].filter(Boolean).join(' ') || '—') },
+    { label: tr(t, 'modelPickerPriceColumn', '价格（输入/输出）'), values: models.map((m) => `${fmtPrice(m.cost?.input)} / ${fmtPrice(m.cost?.output)}`) },
+    { label: tr(t, 'modelPickerContextColumn', '上下文'), values: models.map((m) => fmtContext(m.contextWindow)) },
+    { label: tr(t, 'modelPickerModalColumn', '输出模态'), values: models.map((m) => m.outputModalities.map(modalityShort).join(' ')) },
+    { label: tr(t, 'modelPickerCapColumn', '能力'), values: models.map((m) => [m.capabilities.reasoning ? tr(t, 'modelPickerReasoning', '推理') : '', m.capabilities.tools ? tr(t, 'modelPickerTools', '工具') : ''].filter(Boolean).join(' ') || '—') },
   ]
   return (
     <div className={styles.compare}>
       <div className={styles.compareHead}>
-        <span>{label('modelPickerCompareTitle', '模型对比')}</span>
-        <button type="button" className={styles.iconBtn} onClick={onClear}>{label('modelPickerCompareClear', '清空对比')}</button>
+        <span>{tr(t, 'modelPickerCompareTitle', '模型对比')}</span>
+        <button type="button" className={styles.iconBtn} onClick={onClear}>{tr(t, 'modelPickerCompareClear', '清空对比')}</button>
       </div>
       <div className={styles.compareGrid}>
         <div />
