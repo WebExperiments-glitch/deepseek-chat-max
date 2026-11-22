@@ -56,7 +56,8 @@ const chosen = [...featured, ...rest].slice(0, 80)
 const DEFAULT_ENDPOINTS = {
   openai: { api: 'https://api.openai.com/v1', protocol: 'openai' },
   anthropic: { api: 'https://api.anthropic.com/v1', protocol: 'anthropic' },
-  google: { api: 'https://generativelanguage.googleapis.com/v1beta', protocol: 'openai' },
+  // Gemini 的 OpenAI 兼容端点是 /v1beta/openai，不是 /v1beta（后者只有 :generateContent 原生协议）
+  google: { api: 'https://generativelanguage.googleapis.com/v1beta/openai', protocol: 'openai' },
   azure: { api: '', protocol: 'openai' },
 }
 for (const id of ['openai', 'anthropic', 'google']) {
@@ -91,8 +92,10 @@ const catalog = finalProviders.map((e) => ({
   protocol: e.protocol,
 }))
 
-// OpenCode 免费网关（zen）：无需用户 Key，服务端注入伪装客户端头（抄 opencode 源码）。
-// 这些模型有免费额度限制（429 FreeUsageLimitError），仅作免 Key 体验用。
+// OpenCode 免费网关：无需用户 Key，服务端注入 Bearer public + x-opencode-* 会话头。
+// 注意它与付费的 opencode-go/opencode-zen 不同：后者对话端点在 /inference/...，
+// 本免费网关走 /zen/v1（注入的会话头使其可用），已实测能到达并返回 429 配额错误。
+// 免费额度有限，仅作免 Key 体验用。
 catalog.unshift({
   id: 'opencode-free',
   name: 'OpenCode Free',
@@ -117,6 +120,9 @@ catalog.unshift({
 const header = `// 自动生成，勿手改。来源：models.dev api.json（MIT）。
 // 生成命令：node scripts/gen-provider-catalog.mjs
 // 这是「供应商品牌清单」：只存端点与 Key 名，模型元数据由 modelMeta.ts 运行时提供。
+// 注意：协议(openai/anthropic)由端点 URL 启发式推断，端点可用性未逐家验证；
+// 多数品牌只是「碰巧 OpenAI 兼容才可用」，Azure/Bedrock/Vertex/Ollama 等会 404。
+// 完整能力（附件/搜索/语音/标题）仅 DeepSeek 支持。
 
 export type CatalogProvider = {
   id: string

@@ -30,18 +30,30 @@ This project starts from `deepseek-ai/chat-demo` (MIT) and adds substantial enha
 
 | Dimension | Official demo | This project |
 | --- | --- | --- |
-| Providers | DeepSeek only | 84 providers (catalog generated from models.dev), each independently selectable |
+| Providers | DeepSeek only | 84 brands in a models.dev-generated catalog, each selectable; **full functionality only with DeepSeek** — most third-party endpoints support OpenAI-compatible text chat only |
 | Storage | Browser-local | Local SQLite (loopback service), ZIP history import/export, accelerated import of 627 MB-scale archives |
 | Model picker | Fixed / minimal | Dedicated Models settings page, e-commerce-style filtering (price / context / capabilities / modalities), OpenCode-style selection interactions |
 | Web search | DeepSeek server tool only | 5 pluggable options (DeepSeek tool/API, Tavily, Serper, Brave); third parties routed through a local proxy |
-| Speech | DeepSeek built-in | Registry-based engines (ASR/TTS pluggable), dynamic voices and sample rates |
+| Speech | DeepSeek built-in | Engine registry + dynamic voices/sample rates; only one ASR/TTS implementation (DeepSeek) ships today |
 | Images / documents | Upload and send | Capability detection: if the model lacks image support, content is OCR'd to text first; videos are rejected when unsupported |
-| OCR | None | Pluggable OCR engines (DeepSeek OCR built in, third parties welcome) |
+| OCR | None | Images/documents converted to text when the model lacks image support; registry currently ships only DeepSeek OCR (extension point left for third parties) |
 | Error handling | Raw English errors | Machine codes stay machine, human UI: stable codes + Chinese reassurance + auto-retry gates |
 | Architecture | Conventional frontend | ports/adapters layering, pure TS core, portable |
 | License | MIT | MIT (upstream copyright and NOTICE retained) |
 
-The visual layer follows the official style closely: brand blue `#3964fe`, bluish-gray neutrals, hairline borders, three-tier tokens, capsule shapes, state-machine copy. See `_research/DS风格审查报告.md` for the style audit (if that directory is not shipped with the repo, `NOTICE` and source remain authoritative).
+The visual layer follows the official style: brand blue `#3964fe`, bluish-gray neutrals, hairline borders, three-tier tokens, capsule shapes, state-machine copy (tokens in `src/app/theme.css`).
+
+## Known limitations (read first)
+
+This is an **engineering-complete DeepSeek client**, not a turnkey mass-market chat app and not a "universal provider platform". Registries are extension points, not delivered capabilities:
+
+- **Full functionality only with DeepSeek**: attachments, voice, read-aloud, OCR, auto-titles and server-side search are bound to `Provider.capabilities.deepseekTools`, true only for DeepSeek. Other providers get OpenAI-compatible text chat; leaving DeepSeek silently disables web search.
+- **Catalog ≠ availability**: the 84 brands are a public models.dev list behind a local proxy. Most endpoints "work if they happen to be `/v1/chat/completions`"; Azure, Bedrock, Vertex, Ollama need dedicated auth/routing that the generator does not cover and will 404. The genuinely tuned ones are DeepSeek, OpenRouter, OpenCode Go/Zen and custom endpoints.
+- **Registries are extension points**: search has 5 options (3 third parties via local proxy), but OCR and speech each ship only a DeepSeek implementation — interfaces exist, no second vendor.
+- **Model-picker metadata is not a delivery guarantee**: displayed price/video capability is metadata browsing; whether an attachment can be sent depends on the current model's input modalities and whether it is DeepSeek.
+- **Shares are local-only snapshots**: links live in local SQLite and only open on this machine, not a public share (UI copy reflects this).
+- **Local-first and memory**: reading existing memories (local retrieval injected into context) is on by default; writing (a background `deepseek-flash` extraction after each reply — an extra paid API call) is **off** by default and must be enabled in settings. When enabled, conversation text is sent to the extraction model.
+- **Not a PWA / not for static hosting**: it needs the local Node service for the SQLite API; dropping `dist/` on static hosting (e.g. GitHub Pages) yields an empty shell. The repo ships local-run instructions only; CI runs type/lint/tests/build but does not deploy a static site.
 
 ## Quick start
 
@@ -85,7 +97,7 @@ On first launch, legacy IndexedDB / sql.js data is detected and migrated to SQLi
 - Voice input (live spectrum) and read-aloud, each with swappable engines
 
 **Pluggability**
-- 84 providers, independently selectable; OpenCode free gateway (protocol-level implementation, no agent framework)
+- 84 brands, independently selectable (**note**: most are OpenAI-compatible text endpoints; attachments/search/voice/auto-titles only work fully with DeepSeek); OpenCode free gateway is a protocol-level implementation, no agent framework
 - Model picker: filter by price / context / modality / capability, recent use, favorites and comparison
 - Search, speech and OCR are all registry + dropdown; third-party engines route through the local proxy to bypass CORS
 
@@ -165,7 +177,6 @@ For example, the confusing overflow error now reads:
 │   │   └── ...        model catalog/meta, search/OCR/speech registries, etc.
 │   ├── components/    React UI (chat / settings / markdown / sider / messages ...)
 │   ├── i18n/          English and Chinese copy
-│   ├── pwa/           PWA support
 │   └── utils/         utilities
 ├── server/            local SQLite API service + generic provider proxy
 ├── crates/
@@ -212,7 +223,7 @@ pnpm test    ✓  35 files / 561 tests
 pnpm build   ✓  Rspack compiled successfully
 ```
 
-The visual layer is additionally checked with the ds-demo mechanical validator and browser smoke tests (dark-mode token remapping, zero console errors). See `_research/DS风格审查报告.md`.
+These gates run for real on every push in `.github/workflows/ci.yml` (including `pnpm test` and `pnpm test:server`), not just documented. The local server security tests (auth, nosniff, CSP) are part of `pnpm test:server`.
 
 ## License and acknowledgements
 

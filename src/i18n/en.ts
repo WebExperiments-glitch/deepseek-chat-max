@@ -257,7 +257,7 @@ export const en = {
   share: 'Share',
   shareDialogTitle: 'Share chat',
   shareDialogDescription:
-    'Choose the messages to share. Anyone with the link can view them.',
+    'Choose the messages to snapshot. The snapshot stays on this machine — only this local link can open it.',
   shareCreateLink: 'Create share link',
   shareLinkCopied: 'Share link copied',
   shareNoShareable: 'No shareable messages',

@@ -245,7 +245,7 @@ export const zh = {
   pinSessionTooMany: '置顶对话数量已达上限',
   share: '分享',
   shareDialogTitle: '分享对话',
-  shareDialogDescription: '选择要分享的消息，任何获得链接的人都可以查看。',
+  shareDialogDescription: '选择要生成快照的消息。快照保存在本机，只有本机的此链接可以打开。',
   shareCreateLink: '创建分享链接',
   shareLinkCopied: '分享链接已复制',
   shareNoShareable: '暂无可分享的消息',

@@ -8,6 +8,7 @@ import {
   supportsDeepseekFeatures,
   type ProviderId,
 } from '../services/api/providers.js'
+import { getSearchProvider } from '../services/searchProviders.js'
 import { currentTimeZoneLocation, normalizeLocation, type UserLocation } from '../services/location.js'
 import type { ImageDetail } from '../services/api/toOpenAi.js'
 import { readStorage, writeStorage } from '../services/platform/storage.js'
@@ -385,15 +386,21 @@ const initialAppearance = (): Appearance => {
   }
 }
 
-/** 旧版只有一个总开关：拆分读写后分别继承旧值，未设置过时默认开启 */
+/**
+ * 记忆读/写分别初始化。
+ * - 读取（把已有记忆注入上下文）默认开：纯本地检索，不额外调用 API；
+ * - 写入（每轮回复后台调 deepseek-flash 抽取）默认关：它是一次额外的付费 API 调用，
+ *   且与「数据不出本机」的口号存在张力。用户需主动开启才生效。
+ * 旧版单一总开关的值在拆分时各自继承，但新用户默认写关闭。
+ */
 const initialMemoryFlags = (): { read: boolean; write: boolean } => {
   const legacy = read(KEYS.legacyMemoryEnabled)
-  const fallback = legacy === null ? true : legacy !== 'false'
+  const legacyRead = legacy === null ? true : legacy !== 'false'
   const readSaved = read(KEYS.memoryReadEnabled)
   const writeSaved = read(KEYS.memoryWriteEnabled)
   return {
-    read: readSaved === null ? fallback : readSaved !== 'false',
-    write: writeSaved === null ? fallback : writeSaved !== 'false',
+    read: readSaved === null ? legacyRead : readSaved !== 'false',
+    write: writeSaved === null ? false : writeSaved !== 'false',
   }
 }
 
@@ -487,8 +494,12 @@ export const setSpeechProvider = (speechProviderId: string) => {
 /** 切换对话服务商；各家的 Key 与模型互相独立，切回时沿用上次的选择 */
 export const setProvider = (provider: ProviderId) => {
   write(KEYS.provider, provider)
-  // 联网搜索只属于 DeepSeek，切到其他服务商时关掉，避免后台继续按旧开关发请求
-  const resetSearch = !supportsDeepseekFeatures(provider) && useSettings.getState().search
+  // 只有 DeepSeek 专属的服务端工具搜索（deepseek-tools）会在切离 DeepSeek 时失效；
+  // 第三方独立搜索（Tavily/Serper/Brave/deepseek-api）走本地代理，与当前服务商无关，
+  // 不该被静默关掉——否则「可插拔搜索」的声明与按钮行为自相矛盾。
+  const state = useSettings.getState()
+  const currentSearchIsServerTool = getSearchProvider(state.searchProviderId).kind === 'server-tool'
+  const resetSearch = !supportsDeepseekFeatures(provider) && state.search && currentSearchIsServerTool
   if (resetSearch) {
     write(KEYS.search, 'false')
   }

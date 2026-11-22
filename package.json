@@ -1,9 +1,12 @@
 {
-  "name": "chat-demo",
+  "name": "deepseek-chat-max",
   "version": "0.1.1",
-  "description": "本地优先的 DeepSeek 聊天应用，数据保存在本机 SQLite。",
+  "description": "Local-first, pluggable DeepSeek chat client with local SQLite storage.",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WebExperiments-glitch/deepseek-chat-max.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "rspack serve -c rspack.config.ts",

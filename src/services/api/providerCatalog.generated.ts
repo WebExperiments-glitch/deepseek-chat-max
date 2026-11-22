@@ -1,6 +1,9 @@
 // 自动生成，勿手改。来源：models.dev api.json（MIT）。
 // 生成命令：node scripts/gen-provider-catalog.mjs
 // 这是「供应商品牌清单」：只存端点与 Key 名，模型元数据由 modelMeta.ts 运行时提供。
+// 注意：协议(openai/anthropic)由端点 URL 启发式推断，端点可用性未逐家验证；
+// 多数品牌只是「碰巧 OpenAI 兼容才可用」，Azure/Bedrock/Vertex/Ollama 等会 404。
+// 完整能力（附件/搜索/语音/标题）仅 DeepSeek 支持。
 
 export type CatalogProvider = {
   id: string
@@ -44,8 +47,8 @@ export const PROVIDER_CATALOG: CatalogProvider[] = [
   {
     "id": "google",
     "name": "Google",
-    "baseURL": "https://generativelanguage.googleapis.com/v1beta",
-    "modelsURL": "https://generativelanguage.googleapis.com/v1beta/models",
+    "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "modelsURL": "https://generativelanguage.googleapis.com/v1beta/openai/models",
     "env": [
       "GOOGLE_API_KEY"
     ],

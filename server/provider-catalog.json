@@ -22,8 +22,8 @@
   {
     "id": "google",
     "name": "Google",
-    "baseURL": "https://generativelanguage.googleapis.com/v1beta",
-    "modelsURL": "https://generativelanguage.googleapis.com/v1beta/models",
+    "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "modelsURL": "https://generativelanguage.googleapis.com/v1beta/openai/models",
     "env": [
       "GOOGLE_API_KEY"
     ],

@@ -17,9 +17,7 @@ deepseek-ai/chat-demo  —  Copyright (c) 2026 DeepSeek  —  MIT License
 HTML 代码块「运行 / 实时预览」面板的实现参考了 chat.deepseek.com 公开前端的
 行为，由本项目独立、逐行重写（clean-room reimplementation），并非复制其源码。
 它的工作原理（iframe sandbox、postMessage 就绪探针、blob/srcdoc 双路径）属于
-通用的前端运行沙箱模式。分析记录见：
-  _research/web-full/deepseek/逆向-代码预览-README.md
-  _research/deepseek-web/README.md
+通用的前端运行沙箱模式。相关逆向分析为项目开发期的内部记录，未随本发布物分发。
 
 --------------------------------------------------------------------------------
 Rust 组件
