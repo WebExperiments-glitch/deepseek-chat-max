@@ -63,9 +63,15 @@ type Settings = {
   themePreference: ThemePreference
   location: UserLocation | null
   ttsVoice: TtsVoice
+  /** 当前语音引擎 id */
+  speechProviderId: string
   thinking: boolean
   /** 智能搜索开关。搜索/看网页的轮数不做固定档位，交给模型判断或用户在提问里显式指定。 */
   search: boolean
+  /** 当前联网搜索商 id（deepseek-tools / deepseek-api / tavily / serper / brave） */
+  searchProviderId: string
+  /** 各搜索商的独立 API Key（第三方搜索 API 用） */
+  searchKeys: Record<string, string>
   /** 采样温度 0–2；思考模式下服务端自行处理 */
   temperature: number
   /** 核采样阈值 0.01–1 */
@@ -130,8 +136,11 @@ const KEYS = {
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
+  speechProviderId: 'chat-demo:speech-provider',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
+  searchProviderId: 'chat-demo:search-provider',
+  searchKeys: 'chat-demo:search-keys',
   temperature: 'chat-demo:temperature',
   topP: 'chat-demo:top-p',
   maxTokens: 'chat-demo:max-tokens',
@@ -298,6 +307,35 @@ const initialSearchEnabled = (): boolean => {
   return read(KEYS.search) === 'true'
 }
 
+const initialSearchProviderId = (): string => {
+  const saved = read(KEYS.searchProviderId)
+  return saved && ['deepseek-tools', 'deepseek-api', 'tavily', 'serper', 'brave'].includes(saved)
+    ? saved
+    : 'deepseek-tools'
+}
+
+const initialSearchKeys = (): Record<string, string> => {
+  const raw = read(KEYS.searchKeys)
+  if (!raw) {
+    return {}
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object') {
+      return {}
+    }
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string') {
+        out[key] = value
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 /** 读可留空的数值设置：缺失、非法或非正数时为 null，表示使用服务端默认值 */
 const initialOptionalNumber = (key: string, min: number, max: number): number | null => {
   const raw = read(key)
@@ -365,8 +403,11 @@ export const useSettings = create<Settings>(() => ({
   location: initialLocation(),
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
+  speechProviderId: read(KEYS.speechProviderId) || 'deepseek',
   thinking: read(KEYS.thinking) === 'true',
   search: initialSearchEnabled(),
+  searchProviderId: initialSearchProviderId(),
+  searchKeys: initialSearchKeys(),
   temperature: initialNumber(KEYS.temperature, 1, 0, 2),
   topP: initialNumber(KEYS.topP, 1, 0.01, 1),
   maxTokens: initialOptionalNumber(KEYS.maxTokens, 1, 65536),
@@ -433,6 +474,11 @@ export const setTtsVoice = (ttsVoice: TtsVoice) => {
   useSettings.setState({ ttsVoice })
 }
 
+export const setSpeechProvider = (speechProviderId: string) => {
+  write(KEYS.speechProviderId, speechProviderId)
+  useSettings.setState({ speechProviderId })
+}
+
 /** 切换对话服务商；各家的 Key 与模型互相独立，切回时沿用上次的选择 */
 export const setProvider = (provider: ProviderId) => {
   write(KEYS.provider, provider)
@@ -471,6 +517,17 @@ export const setThinking = (thinking: boolean) => {
 export const setSearch = (search: boolean) => {
   write(KEYS.search, String(search))
   useSettings.setState({ search })
+}
+
+export const setSearchProvider = (id: string) => {
+  write(KEYS.searchProviderId, id)
+  useSettings.setState({ searchProviderId: id })
+}
+
+export const setSearchKey = (providerId: string, key: string) => {
+  const keys = { ...useSettings.getState().searchKeys, [providerId]: key }
+  write(KEYS.searchKeys, JSON.stringify(keys))
+  useSettings.setState({ searchKeys: keys })
 }
 
 export const setTemperature = (temperature: number) => {

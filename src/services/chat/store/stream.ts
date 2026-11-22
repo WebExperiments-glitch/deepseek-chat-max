@@ -2,7 +2,7 @@ import { prepareImageFile } from '../../../utils/image.js'
 import { ApiError, streamMessage, streamOpenAiChat } from '../../api/client.js'
 import { DEEPSEEK_ORIGIN, getProvider, supportsDeepseekFeatures } from '../../api/providers.js'
 import { streamResponses, toResponsesInput } from '../../api/responses.js'
-import { digestForQuestion, SEARCH_DIGEST_LABEL } from '../../api/webSearch.js'
+import { SEARCH_DIGEST_LABEL } from '../../api/webSearch.js'
 import type { MessageStreamEvent } from '../../api/types.js'
 import { replyPrefixText, toOpenAiMessages, type InlineAttachment } from '../../api/toOpenAi.js'
 import {
@@ -42,6 +42,7 @@ import {
 } from '../compression.js'
 import { composeSystemPrompt } from '../systemPrompt.js'
 import { getActivePresetPrompt } from '../../presets.js'
+import { digestWithProvider, getSearchProvider } from '../../searchProviders.js'
 import { formatTimeContext } from '../timeContext.js'
 import { extractRoundMemory, memoryBlockForQuery } from '../../memory/store.js'
 import * as db from '../db.js'
@@ -513,19 +514,26 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
          * 与摘要 / 记忆 / 时间一样冻结进 requestContext，保证前缀稳定；失败就降级为无摘编。
          */
         let searchDigest = ''
-        const needsPresearch =
-          !supportsDeepseekFeatures(now.provider) ||
-          (now.provider === 'deepseek' && now.deepseekProtocol === 'responses')
-        if (initial.search && needsPresearch && getDeepseekApiKey()) {
-          try {
-            const digest = await digestForQuestion(
-              getDeepseekApiKey(),
-              prepared.question.content,
-              controller.signal
-            )
-            searchDigest = `${SEARCH_DIGEST_LABEL}\n${digest.text}`
-          } catch {
-            // 检索失败不阻断主请求，按无搜索结果继续
+        // 可插拔搜索商：standalone 类（独立 API）走预检摘编；server-tool 类由服务端工具处理。
+        const searchProvider = getSearchProvider(now.searchProviderId)
+        if (initial.search && searchProvider.kind === 'standalone') {
+          // 第三方搜索商用独立 Key，DeepSeek 检索 API 用 DeepSeek Key
+          const key =
+            searchProvider.id === 'deepseek-api'
+              ? getDeepseekApiKey()
+              : now.searchKeys[searchProvider.id] ?? ''
+          if (key) {
+            try {
+              const digest = await digestWithProvider(
+                searchProvider,
+                key,
+                prepared.question.content,
+                controller.signal
+              )
+              searchDigest = `${SEARCH_DIGEST_LABEL}\n${digest.text}`
+            } catch {
+              // 检索失败不阻断主请求，按无搜索结果继续
+            }
           }
         }
         const contextTail = [
@@ -673,7 +681,12 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
               ...(identity ? { metadata: identity } : {}),
               ...(deepseekAnthropic && now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
               tools: deepseekAnthropic
-                ? [...serverTools(initial.search ?? false), ...toAnthropicTools(clientTools)]
+                ? [
+                    ...serverTools(
+                      (initial.search ?? false) && searchProvider.kind === 'server-tool'
+                    ),
+                    ...toAnthropicTools(clientTools),
+                  ]
                 : toAnthropicTools(clientTools),
               ...(deepseekAnthropic && titleRequests.has(controller)
                 ? { title: { enabled: true } }

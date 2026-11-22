@@ -76,7 +76,16 @@ const proxyProvider = async (req, res, pathname) => {
   const parts = pathname.split('/').filter(Boolean)
   const id = parts[1]
   const rest = parts.slice(2).join('/')
-  const provider = PROVIDER_CATALOG.find((p) => p.id === id)
+  let provider = PROVIDER_CATALOG.find((p) => p.id === id)
+  // 第三方搜索商（非模型服务商）的代理目标
+  const SEARCH_PROXY = {
+    'search-tavily': 'https://api.tavily.com',
+    'search-serper': 'https://google.serper.dev',
+    'search-brave': 'https://api.search.brave.com',
+  }
+  if (!provider && SEARCH_PROXY[id]) {
+    provider = { id, baseURL: SEARCH_PROXY[id] }
+  }
   if (!provider) {
     return sendError(res, 404, `unknown provider: ${id ?? ''}`)
   }

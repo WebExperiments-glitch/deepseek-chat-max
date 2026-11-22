@@ -63,6 +63,9 @@ import { ParamControl } from './ParamControls.js'
 import paramStyles from './ParamControls.module.css'
 import { ProviderSetting } from './ProviderSetting.js'
 import { ModelPicker } from './ModelPicker.js'
+import { SearchProviderSetting } from './SearchProviderSetting.js'
+import { getSpeechProvider, SPEECH_PROVIDERS } from '../../services/speechProviders.js'
+import { setSpeechProvider } from '../../services/settings.js'
 import { AppearanceSetting } from './AppearanceSetting.js'
 import { createLatestReminder } from '../../services/chat/latestReminder.js'
 import { useModels } from '../../services/models.js'
@@ -304,6 +307,7 @@ const ChatSettings = () => {
   return (
     <>
       <PresetManager />
+      <SearchProviderSetting />
       <PromptPreview />
       {/* 默认提示词：没有启用预设时才生效；预设会覆盖这里 */}
       <div className={paramStyles.promptCell}>
@@ -768,22 +772,35 @@ const LocaleSetting = () => {
 const TtsVoiceSetting = () => {
   const t = useTranslate()
   const ttsVoice = useSettings((state) => state.ttsVoice)
+  const speechProviderId = useSettings((state) => state.speechProviderId)
+  const provider = getSpeechProvider(speechProviderId)
   return (
-    <SettingCell
-      label={t('settingsTtsVoice')}
-      status={null}
-      action={
-        <Select
-          ariaLabel={t('settingsTtsVoice')}
-          value={ttsVoice}
-          options={[
-            { value: 'stella', label: t('settingsTtsVoiceStella') },
-            { value: 'tide', label: t('settingsTtsVoiceTide') },
-          ]}
-          onChange={setTtsVoice}
-        />
-      }
-    />
+    <>
+      <SettingCell
+        label={t('speechProviderLabel')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('speechProviderLabel')}
+            value={speechProviderId}
+            options={SPEECH_PROVIDERS.map((p) => ({ value: p.id, label: p.name }))}
+            onChange={setSpeechProvider}
+          />
+        }
+      />
+      <SettingCell
+        label={t('settingsTtsVoice')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('settingsTtsVoice')}
+            value={ttsVoice}
+            options={provider.voices.map((v) => ({ value: v.id, label: v.name }))}
+            onChange={(v) => setTtsVoice(v as typeof ttsVoice)}
+          />
+        }
+      />
+    </>
   )
 }
 

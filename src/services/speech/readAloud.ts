@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { TranslationMessage } from '../../i18n/index.js'
 import { ApiError } from '../api/client.js'
 import { classifyApiError } from '../api/errors.js'
-import { synthesize, TTS_SAMPLE_RATE } from '../api/speech.js'
+import { getSpeechProvider } from '../speechProviders.js'
 import { useSettings } from '../settings.js'
 
 /**
@@ -87,13 +87,14 @@ export const toggleReadAloud = (
   if (reading === messageId) {
     return
   }
+  // 语音引擎在开始朗读时读取，设置中切换后下一次朗读生效
+  const { apiKeys, ttsVoice, speechProviderId } = useSettings.getState()
+  const provider = getSpeechProvider(speechProviderId)
   const controller = new AbortController()
-  const context = new AudioContext({ sampleRate: TTS_SAMPLE_RATE })
+  const context = new AudioContext({ sampleRate: provider.sampleRate })
   current = { controller, context }
   useReadAloud.setState({ messageId, status: 'loading' })
-  // 音色在开始朗读时读取，设置中切换后下一次朗读生效
-  const { apiKeys, ttsVoice } = useSettings.getState()
-  // 语音固定走 DeepSeek 的接口，与当前对话服务商无关
+  // DeepSeek 引擎用 DeepSeek Key；其他引擎以后可各自取 Key
   const apiKey = apiKeys.deepseek ?? ''
 
   void (async () => {
@@ -101,7 +102,7 @@ export const toggleReadAloud = (
     let lastSource: AudioBufferSourceNode | null = null
     let rest = new Uint8Array(0)
     try {
-      const stream = await synthesize(apiKey, text, ttsVoice, controller.signal)
+      const stream = await provider.synth(apiKey, text, ttsVoice, controller.signal)
       const reader = stream.getReader()
       controller.signal.addEventListener('abort', () => void reader.cancel().catch(() => {}))
       for (;;) {
@@ -117,7 +118,7 @@ export const toggleReadAloud = (
         if (samples.length === 0) {
           continue
         }
-        const buffer = context.createBuffer(1, samples.length, TTS_SAMPLE_RATE)
+        const buffer = context.createBuffer(1, samples.length, provider.sampleRate)
         buffer.copyToChannel(samples, 0)
         const source = context.createBufferSource()
         source.buffer = buffer

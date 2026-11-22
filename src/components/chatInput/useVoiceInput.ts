@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TranslationMessage } from '../../i18n/index.js'
-import { transcribe } from '../../services/api/speech.js'
+import { getSpeechProvider } from '../../services/speechProviders.js'
 import { startRecording, type Recording } from '../../services/speech/recorder.js'
-import { getDeepseekApiKey } from '../../services/settings.js'
+import { getDeepseekApiKey, useSettings } from '../../services/settings.js'
 import { showToast } from '../base/toastState.js'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing'
@@ -75,8 +75,9 @@ export const useVoiceInput = (onText: (text: string) => void) => {
       controller = new AbortController()
       controllerRef.current = controller
       setStatus('transcribing')
-      // 语音识别固定走 DeepSeek 的接口
-      const text = await transcribe(getDeepseekApiKey(), audio, controller.signal)
+      // 按当前语音引擎做识别（内置 DeepSeek）
+      const provider = getSpeechProvider(useSettings.getState().speechProviderId)
+      const text = await provider.transcribe(getDeepseekApiKey(), audio, controller.signal)
       if (controller.signal.aborted || operationRef.current !== operation) {
         return
       }
