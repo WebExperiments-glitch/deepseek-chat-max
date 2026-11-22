@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TranslationMessage } from '../../i18n/index.js'
+import { platform } from '../../ports/platform.js'
 import { ApiError } from '../api/client.js'
 import { classifyApiError } from '../api/errors.js'
 import { getSpeechProvider } from '../speechProviders.js'
@@ -91,7 +92,7 @@ export const toggleReadAloud = (
   const { apiKeys, ttsVoice, speechProviderId } = useSettings.getState()
   const provider = getSpeechProvider(speechProviderId)
   const controller = new AbortController()
-  const context = new AudioContext({ sampleRate: provider.sampleRate })
+  const context = platform().createAudioContext(provider.sampleRate)
   current = { controller, context }
   useReadAloud.setState({ messageId, status: 'loading' })
   // DeepSeek 引擎用 DeepSeek Key；其他引擎以后可各自取 Key

@@ -15,6 +15,7 @@
  * 因此运行的代码不能访问父页面 DOM、localStorage、Cookie，也不能跳转顶层页面。
  * 这是官网同款边界，纯前端隔离，不执行任何 Node/系统能力。
  */
+import { platform } from '../../ports/platform.js'
 
 const CHARSET_META = '<meta charset="UTF-8">'
 const RE_CHARSET = /<meta\b[^>]*\bcharset\s*=/i
@@ -95,7 +96,7 @@ export const createPreviewRunner = () => {
 
   const releaseBlob = () => {
     if (blobUrl) {
-      URL.revokeObjectURL(blobUrl)
+      platform().revokeObjectURL(blobUrl)
       blobUrl = null
     }
   }
@@ -146,28 +147,27 @@ export const createPreviewRunner = () => {
       settleReady()
       doCleanup()
     }
+    let offMessage: () => void = () => {}
     const doCleanup = () => {
-      window.removeEventListener('message', onMessage)
+      offMessage()
       iframe.removeEventListener('load', onLoad)
       if (cleanup === doCleanup) {
         cleanup = null
       }
     }
 
-    window.addEventListener('message', onMessage)
+    offMessage = platform().onWindowMessage(onMessage)
     iframe.addEventListener('load', onLoad)
     cleanup = doCleanup
 
     const useSrcDoc =
-      /\bAndroid\b/i.test(navigator.userAgent) ||
-      typeof URL === 'undefined' ||
-      typeof URL.createObjectURL !== 'function'
+      /\bAndroid\b/i.test(platform().userAgent()) || !platform().canCreateObjectURL()
     if (useSrcDoc) {
       iframe.removeAttribute('src')
       iframe.srcdoc = html
     } else {
       iframe.removeAttribute('srcdoc')
-      blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+      blobUrl = platform().createObjectURL(new Blob([html], { type: 'text/html' }))
       iframe.src = blobUrl
     }
     return ready

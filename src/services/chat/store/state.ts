@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { createId } from '../../../utils/id.js'
+import { platform } from '../../../ports/platform.js'
 import { getCurrentModel, useSettings } from '../../settings.js'
 import * as db from '../db.js'
 import { settleReply } from '../reply.js'
@@ -213,16 +214,16 @@ export const bindChatPersistence = () => {
       }
     }
   }
-  const onVisibilityChange = () => {
-    if (document.visibilityState === 'hidden') {
+  const p = platform()
+  const offVisibility = p.onVisibilityChange(() => {
+    if (p.isPageHidden()) {
       save()
     }
-  }
-  document.addEventListener('visibilitychange', onVisibilityChange)
-  window.addEventListener('pagehide', save)
+  })
+  const offPageHide = p.onPageHide(save)
   return () => {
-    document.removeEventListener('visibilitychange', onVisibilityChange)
-    window.removeEventListener('pagehide', save)
+    offVisibility()
+    offPageHide()
   }
 }
 

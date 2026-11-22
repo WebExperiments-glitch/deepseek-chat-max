@@ -9,7 +9,7 @@
  * 只是编译期的依赖倒置，核心与平台/UI/框架完全隔离。
  */
 
-/** HTTP 端口：所有网络请求经此，iOS 侧换 URLSession 实现即可 */
+/** HTTP 端口的实现与注入见 ./http.ts；这里只保留类型别名供需要的地方引用 */
 export type Http = (url: string, init?: RequestInit) => Promise<Response>
 
 /** 键值存储端口：platform/storage.ts 的抽象，可换 UserDefaults */

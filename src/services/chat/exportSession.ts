@@ -1,4 +1,5 @@
 import { useSettings } from '../settings.js'
+import { platform } from '../../ports/platform.js'
 import { getVisibleMessages } from './branches.js'
 import type { AssistantMessage, Message, Session } from './types.js'
 
@@ -151,13 +152,7 @@ const sanitize = (value: string): string =>
     .slice(0, 80) || 'chat'
 
 const download = (name: string, content: string, mime: string) => {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  platform().saveBlob(new Blob([content], { type: mime }), name)
 }
 
 /** 导出当前分支可见消息：Markdown / 完整 JSON / 自包含 HTML */

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TranslationMessage } from '../../i18n/index.js'
+import { platform } from '../../ports/platform.js'
 import { createId } from '../../utils/id.js'
 import { prepareImageFile } from '../../utils/image.js'
 import {
@@ -84,7 +85,7 @@ export const addDraftFiles = async (
       id: createId(),
       file,
       isImage: image,
-      previewUrl: image ? URL.createObjectURL(file) : null,
+      previewUrl: image ? platform().createObjectURL(file) : null,
     }
   })
   updateDraft(sessionId, (draft) => ({ ...draft, attachments: [...draft.attachments, ...added] }))
@@ -133,7 +134,7 @@ const releaseAttachment = (attachment: DraftAttachment, cancel: boolean) => {
     cancelUpload(attachment.id)
   }
   if (attachment.previewUrl) {
-    URL.revokeObjectURL(attachment.previewUrl)
+    platform().revokeObjectURL(attachment.previewUrl)
   }
 }
 

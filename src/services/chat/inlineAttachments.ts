@@ -2,6 +2,7 @@ import type { ImageDetail, InlineAttachment, SkippedAttachment } from '../api/to
 import type { FileAttachment } from './types.js'
 import { loadFile } from './db.js'
 import { planDelivery, type ModelCapabilities } from '../modelCapabilities.js'
+import { platform } from '../../ports/platform.js'
 import { getOcrProvider, type OcrProvider } from '../ocrProviders.js'
 
 /**
@@ -109,14 +110,12 @@ export const describeSkippedNames = (names: string[]): InlineNotice => {
   }
 }
 
-const toDataUrl = (blob: Blob, mimeType: string): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error('read failed'))
-    reader.onload = () => resolve(String(reader.result ?? ''))
-    // 有些附件在 IndexedDB 里没有 MIME，按图片类别补一个默认值
-    reader.readAsDataURL(new Blob([blob], { type: mimeType || blob.type || 'image/png' }))
-  })
+const toDataUrl = async (blob: Blob, mimeType: string): Promise<string> => {
+  // 有些附件在 IndexedDB 里没有 MIME，按图片类别补一个默认值
+  const normalized = new Blob([blob], { type: mimeType || blob.type || 'image/png' })
+  const bytes = new Uint8Array(await normalized.arrayBuffer())
+  return `data:${normalized.type};base64,${platform().bytesToBase64(bytes)}`
+}
 
 export type InlineOptions = {
   /** 图片细节级别，透传给 image_url.detail（file_id 引用时服务端忽略） */

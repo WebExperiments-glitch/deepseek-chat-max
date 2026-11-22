@@ -4,6 +4,8 @@
  * AudioContext 以 16kHz 创建，浏览器负责重采样；ScriptProcessorNode 采集 PCM 样本。
  * 录音处理在页面内完成。
  */
+import { platform } from '../../ports/platform.js'
+
 export const SAMPLE_RATE = 16000
 /** ASR 单次时长上限 120 秒 */
 export const MAX_SECONDS = 120
@@ -21,9 +23,7 @@ export type Recording = {
 
 /** 开始录音；到达时长上限时调用 onLimit，由调用方决定何时 stop */
 export const startRecording = async (onLimit: () => void): Promise<Recording> => {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-  })
+  const stream = await platform().requestMicrophone()
   let context: AudioContext | undefined
   let source: MediaStreamAudioSourceNode | undefined
   let processor: ScriptProcessorNode | undefined
@@ -53,7 +53,7 @@ export const startRecording = async (onLimit: () => void): Promise<Recording> =>
   }
 
   try {
-    context = new AudioContext({ sampleRate: SAMPLE_RATE })
+    context = platform().createAudioContext(SAMPLE_RATE)
     source = context.createMediaStreamSource(stream)
     processor = context.createScriptProcessor(BUFFER_SIZE, 1, 1)
     // 频谱分析用：串在录音链路中间（原样透传），WebKit 不会处理未连到输出的分析节点

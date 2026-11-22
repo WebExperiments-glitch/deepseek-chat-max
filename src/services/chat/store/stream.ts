@@ -1,4 +1,5 @@
 import { prepareImageFile } from '../../../utils/image.js'
+import { platform } from '../../../ports/platform.js'
 import { ApiError, streamMessage, streamOpenAiChat } from '../../api/client.js'
 import { DEEPSEEK_ORIGIN, getProvider, supportsDeepseekFeatures } from '../../api/providers.js'
 import { streamResponses, toResponsesInput } from '../../api/responses.js'
@@ -494,7 +495,7 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
   // 请求发出时采样一次请求表面体积，作为占用锚点的基准；压缩后的即时回落由它计算
   let surfaceTokens: number | undefined
   const flush = () => {
-    cancelAnimationFrame(frame)
+    platform().cancelFrame(frame)
     frame = 0
     updateReply(sessionId, reply)
   }
@@ -739,10 +740,10 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
             titleRequests.delete(controller)
           }
           reply = applyEvent(reply, event, Date.now(), blockIndexes)
-          if (document.visibilityState === 'hidden') {
+          if (platform().isPageHidden()) {
             flush()
           } else {
-            frame ||= requestAnimationFrame(flush)
+            frame ||= platform().scheduleFrame(flush)
           }
         }
         reply = settleReply(reply, 'done', Date.now())
@@ -833,7 +834,7 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
   } finally {
     titleRequests.delete(controller)
     streamFlushes.delete(sessionId)
-    cancelAnimationFrame(frame)
+    platform().cancelFrame(frame)
     updateReply(sessionId, reply)
     // 记下这一轮真正发出去的 prompt 体量与当时的请求表面，供圆环即时显示压缩后的变化
     noteContextUsage(sessionId, reply.usage, reply.model, surfaceTokens)

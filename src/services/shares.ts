@@ -1,4 +1,5 @@
 import { deleteJson, getJson, postJson } from './api/localServer.js'
+import { platform } from '../ports/platform.js'
 
 /** 分享快照里的一条消息；只保留展示所需字段，不包含分支与请求参数 */
 export type ShareMessage = {
@@ -35,4 +36,4 @@ export const getShare = (id: string) => getJson<Share>(`/api/shares/${encodeURIC
 export const deleteShare = (id: string) =>
   deleteJson<{ ok: true }>(`/api/shares/${encodeURIComponent(id)}`)
 
-export const shareLink = (id: string) => `${window.location.origin}/share/${id}`
+export const shareLink = (id: string) => `${platform().locationOrigin()}/share/${id}`
