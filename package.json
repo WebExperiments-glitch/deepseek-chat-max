@@ -10,9 +10,14 @@
     "dev:server": "node --watch server/index.mjs",
     "server": "node server/index.mjs",
     "start": "node server/index.mjs",
-    "build": "rm -rf dist && NODE_ENV=production rspack build -c rspack.config.ts",
+    "build": "node scripts/build.mjs",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "verify:wasm": "node scripts/verify-zip-wasm.mjs",
+    "verify:batch": "node scripts/verify-batch-import.mjs",
     "type": "tsc -p tsconfig.json",
     "lint": "oxlint src rspack.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:server": "node --test scripts/verify-server-db.mjs",
     "format": "oxfmt --write ."
   },
@@ -46,6 +51,10 @@
     "@types/node": "~20.9.2",
     "oxfmt": "0.48.0",
     "oxlint": "1.63.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "^3.2.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }

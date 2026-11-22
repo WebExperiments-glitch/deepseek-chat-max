@@ -1,4 +1,5 @@
 import { Inflate } from 'fflate'
+import { crc32Finish, crc32Init, crc32Update, crc32UsingWasm, wasmInflate } from './crc32.js'
 
 const READ_CHUNK_BYTES = 256 * 1024
 // 控制每轮同步解压的工作量；输出交给调用方保存后才继续读取。
@@ -23,14 +24,6 @@ export const isZipFile = async (file: File) => {
 }
 
 const viewOf = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-
-const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
-  let crc = value
-  for (let bit = 0; bit < 8; bit++) {
-    crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
-  }
-  return crc >>> 0
-})
 
 const readBytes = async (file: File, start: number, length: number) => {
   if (start < 0 || length < 0 || start + length > file.size) {
@@ -85,7 +78,7 @@ type Entry = {
   offset: number
 }
 
-const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: number }> => {
+export const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: number }> => {
   if (file.size < 22) {
     invalid()
   }
@@ -177,6 +170,9 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
   return { entries: entries.sort((a, b) => a.offset - b.offset), offset }
 }
 
+/** 解析后的中央目录，可由 checkArchiveFormat 传给 readArchive 复用，避免解析两遍。 */
+export type ZipDirectory = Awaited<ReturnType<typeof readDirectory>>
+
 const readEntryOffset = async (file: File, entry: Entry, boundary: number) => {
   if (entry.offset + 30 > boundary) {
     invalid()
@@ -238,8 +234,13 @@ export type ArchiveEntry = {
  * 按条目在文件中的物理顺序逐条、逐块解压，跳过目录条目。
  * 调用方必须消费完当前条目的数据，再请求下一个条目。
  */
-export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
-  const directory = await readDirectory(file)
+export async function* readArchive(
+  file: File,
+  directoryArg?: ZipDirectory
+): AsyncGenerator<ArchiveEntry> {
+  // 预加载 Rust/WASM CRC 加速器；失败会静默降级到 JS，不影响导入。
+  await crc32Init()
+  const directory = directoryArg ?? (await readDirectory(file))
   for (const [index, entry] of directory.entries.entries()) {
     const boundary = directory.entries[index + 1]?.offset ?? directory.offset
     const start = await readEntryOffset(file, entry, boundary)
@@ -256,37 +257,72 @@ export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
         if (written > entry.size) {
           invalid()
         }
-        for (const byte of chunk) {
-          crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff]
-        }
+        crc = crc32Update(crc, chunk)
         if (chunk.length) {
           pending.push(chunk)
         }
       }
-      const inflate = entry.method === 8 ? new Inflate(append) : null
-      for (let offset = 0; offset < entry.compressedSize; offset += READ_CHUNK_BYTES) {
-        const chunk = await readBytes(
-          file,
-          start + offset,
-          Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
-        )
-        if (!inflate) {
-          append(chunk)
-          yield* pending.splice(0)
-          continue
+
+      if (entry.method === 8 && crc32UsingWasm()) {
+        // Rust/WASM 快速路径：整条目一次性 inflate + 就地 CRC。
+        // 会话 JSON 单条目通常只有几百 KB，整块解压可消除 fflate 的 8KB 微分块
+        // 与逐字节 JS CRC，吞吐提升数倍。图片是 STORE，不走这里。
+        const compressed = new Uint8Array(entry.compressedSize)
+        let filled = 0
+        for (let offset = 0; offset < entry.compressedSize; offset += READ_CHUNK_BYTES) {
+          const chunk = await readBytes(
+            file,
+            start + offset,
+            Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
+          )
+          compressed.set(chunk, offset)
+          filled += chunk.length
         }
-        for (let cursor = 0; cursor < chunk.length; cursor += INFLATE_CHUNK_BYTES) {
-          const end = Math.min(cursor + INFLATE_CHUNK_BYTES, chunk.length)
-          inflate.push(chunk.subarray(cursor, end), offset + end === entry.compressedSize)
-          // yield 暂停解压，等待调用方完成异步写入；不缓存整个条目。
+        if (filled !== entry.compressedSize) {
+          invalid()
+        }
+        const result = wasmInflate(compressed)
+        if (result && result.bytes.length === entry.size && crc32Finish(result.crc) === entry.crc) {
+          yield result.bytes
+          completed = true
+          return
+        }
+        // WASM 无法处理（条目过大或数据异常）：用已读入的字节走 fflate 回退。
+        const fallback = new Inflate(append)
+        for (let cursor = 0; cursor < compressed.length; cursor += INFLATE_CHUNK_BYTES) {
+          const end = Math.min(cursor + INFLATE_CHUNK_BYTES, compressed.length)
+          fallback.push(compressed.subarray(cursor, end), end === compressed.length)
+          yield* pending.splice(0)
+        }
+        if (compressed.length === 0) {
+          fallback.push(new Uint8Array(), true)
+          yield* pending.splice(0)
+        }
+      } else {
+        const inflate = entry.method === 8 ? new Inflate(append) : null
+        for (let offset = 0; offset < entry.compressedSize; offset += READ_CHUNK_BYTES) {
+          const chunk = await readBytes(
+            file,
+            start + offset,
+            Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
+          )
+          if (!inflate) {
+            append(chunk)
+            yield* pending.splice(0)
+            continue
+          }
+          for (let cursor = 0; cursor < chunk.length; cursor += INFLATE_CHUNK_BYTES) {
+            const end = Math.min(cursor + INFLATE_CHUNK_BYTES, chunk.length)
+            inflate.push(chunk.subarray(cursor, end), offset + end === entry.compressedSize)
+            yield* pending.splice(0)
+          }
+        }
+        if (inflate && entry.compressedSize === 0) {
+          inflate.push(new Uint8Array(), true)
           yield* pending.splice(0)
         }
       }
-      if (inflate && entry.compressedSize === 0) {
-        inflate.push(new Uint8Array(), true)
-        yield* pending.splice(0)
-      }
-      if (written !== entry.size || (crc ^ 0xffffffff) >>> 0 !== entry.crc) {
+      if (written !== entry.size || crc32Finish(crc) !== entry.crc) {
         invalid()
       }
       completed = true

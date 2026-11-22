@@ -46,6 +46,8 @@ const toReplyBlock = (block: OutputBlockStart, now: number): ReplyBlock | null =
     case 'web_search_tool_result':
     case 'web_fetch_tool_result':
       return block
+    case 'tool_use':
+      return { type: 'tool_use', id: block.id, name: block.name, input: block.input }
     default:
       return null
   }
@@ -84,11 +86,16 @@ export const applyEvent = (
       blockIndexes.delete(event.index)
       const block = toReplyBlock(event.content_block, now)
       if (!block) {
-        // 客户端工具内容不保存；未完成的工具往返也不能作为续写前缀。
-        return event.content_block.type === 'tool_use' ? { ...next, prefix: false } : next
+        return next
       }
       blockIndexes.set(event.index, next.blocks.length)
-      return { ...next, blocks: [...next.blocks, block] }
+      return {
+        ...next,
+        blocks: [...next.blocks, block],
+        // 客户端工具调用没有本地执行与结果回传，属于未完成的工具往返：
+        // 保留块供展示，但不能把这条回复当作续写前缀（否则会被服务端拒绝）。
+        ...(block.type === 'tool_use' ? { prefix: false } : {}),
+      }
     }
     case 'content_block_delta': {
       const index = blockIndexes.get(event.index)
@@ -108,6 +115,9 @@ export const applyEvent = (
         }
         if (block.type === 'text' && delta.type === 'citations_delta') {
           return { ...block, citations: [...(block.citations ?? []), delta.citation] }
+        }
+        if (block.type === 'tool_use' && delta.type === 'input_json_delta') {
+          return { ...block, inputText: (block.inputText ?? '') + delta.partial_json }
         }
         return block
       })
@@ -284,14 +294,18 @@ const isUsableReply = (message: Message): message is AssistantMessage =>
   !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
   getReplyText(message) !== ''
 
-/** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
-const toUserParam = ({ content, files }: UserMessage): MessageParam => {
+/**
+ * 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用。
+ * requestContext 是发送时冻结的动态上下文，回放历史时原样带上，保证前缀一致。
+ */
+const toUserParam = ({ content, files, requestContext }: UserMessage): MessageParam => {
+  const text = [requestContext ?? '', content].filter((part) => part !== '').join('\n\n')
   const blocks = toFileBlocks(files)
   return blocks.length === 0
-    ? { role: 'user', content }
+    ? { role: 'user', content: text }
     : {
         role: 'user',
-        content: [...blocks, ...(content ? [{ type: 'text' as const, text: content }] : [])],
+        content: [...blocks, ...(text ? [{ type: 'text' as const, text }] : [])],
       }
 }
 

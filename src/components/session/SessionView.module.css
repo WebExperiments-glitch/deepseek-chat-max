@@ -3,6 +3,9 @@
   inset: 0;
   display: flex;
   flex-direction: column;
+  background: var(--chat-background, var(--dsw-alias-bg-base));
+  background-size: cover;
+  background-position: center;
 }
 
 .header {
@@ -27,6 +30,13 @@
 
 .withCollapsedSider {
   margin-left: 113px;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
 }
 
 .inputContainer {

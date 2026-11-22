@@ -5,6 +5,9 @@
 
 .message {
   position: relative;
+  padding: var(--chat-assistant-bubble-padding, 0);
+  border-radius: 18px;
+  background-color: var(--chat-assistant-bubble, transparent);
 
   &:hover .actions,
   &:focus-within .actions {
@@ -13,6 +16,24 @@
 
   :global(.ds-assistant-message-main-content) {
     padding-bottom: 6px;
+  }
+}
+
+/* 助手头像：放在消息列左侧的留白里，不挤占正文 */
+.avatar {
+  position: absolute;
+  top: 0;
+  left: -42px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: var(--dsw-alias-bg-skeleton);
+}
+
+@media not all and (min-width: 768px) {
+  .avatar {
+    display: none;
   }
 }
 
@@ -49,6 +70,36 @@
   66% {
     opacity: 1;
   }
+}
+
+/* 函数调用参数 */
+.toolCalls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.toolCall {
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background-color: var(--dsw-alias-markdown-code-block);
+}
+
+.toolCallTitle {
+  margin-bottom: 6px;
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.toolCallArgs {
+  margin: 0;
+  overflow-x: auto;
+  font: var(--dsw-font-markdown-code-block);
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .notice {

@@ -6,7 +6,11 @@ import {
   readOpenAiEvent,
   type OpenAiStreamState,
 } from './parseOpenAiEvent.js'
-import { DEEPSEEK_ANTHROPIC_BASE_URL, type Provider } from './providers.js'
+import {
+  DEEPSEEK_ANTHROPIC_BASE_URL,
+  DEEPSEEK_ORIGIN,
+  type Provider,
+} from './providers.js'
 import { readServerSentEvents } from './sse.js'
 import type {
   ApiErrorBody,
@@ -155,6 +159,27 @@ export const verifyApiKey = async (
   })
 }
 
+/** GET /models 的模型元数据；OpenAI 兼容服务同样提供该端点 */
+export type DeepseekBalance = {
+  is_available: boolean
+  balance_infos: {
+    currency: string
+    total_balance: string
+    granted_balance: string
+    topped_up_balance: string
+  }[]
+}
+
+/** GET /user/balance：DeepSeek 账户余额 */
+export const getBalance = async (apiKey: string, signal?: AbortSignal): Promise<DeepseekBalance> => {
+  const response = await request(`${DEEPSEEK_ORIGIN}/user/balance`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    signal,
+  })
+  return (await response.json()) as DeepseekBalance
+}
+
 /**
  * 模型清单里的一项，字段对齐 GET /models 的模型元数据：
  * context_window、max_output_tokens、input_modalities、effort、api_capabilities。
@@ -171,6 +196,8 @@ export type ModelOption = {
   maxOutputTokens?: number
   /** 支持的输入模态（text / image）；缺省表示未知，不据此禁用功能 */
   inputModalities?: string[]
+  /** 每百万 token 的美元价格（来自 models.dev 元数据，用于费用展示与免费标注） */
+  cost?: { input: number; output: number }
   /** 开启思考时支持的推理强度档位，不含 none */
   effortLevels?: string[]
   /** 未指定强度时服务端使用的默认档位 */
@@ -383,12 +410,15 @@ const hasFile = (body: CreateMessageRequest) =>
 export async function* streamMessage(
   apiKey: string,
   body: CreateMessageRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  baseURL: string = ANTHROPIC_BASE_URL
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await request(`${ANTHROPIC_BASE_URL}/messages`, {
+  const response = await request(`${baseURL}/messages`, {
     method: 'POST',
     headers: {
       ...anthropicHeaders(apiKey, hasFile(body)),
+      // 官方 Anthropic 需要版本头；DeepSeek 兼容接口不依赖它
+      ...(baseURL === ANTHROPIC_BASE_URL ? {} : { 'anthropic-version': '2023-06-01' }),
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     },

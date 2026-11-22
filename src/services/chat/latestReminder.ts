@@ -15,7 +15,11 @@ const locationName = (location: UserLocation | null, locale: Locale): string => 
   return getRegionName(location.region, locale)
 }
 
-/** 模型约定的五项信息；日期与星期使用浏览器本地时区，避免 UTC 日期跨日。 */
+/**
+ * 模型约定的五项信息：date,weekday,location,platform,language。
+ * location 按官方规范允许包含逗号（如 Hong Kong, China），服务端按位置解析，
+ * 不能为了「凑五段」把地区名里的逗号删掉。日期与星期用浏览器本地时区，避免 UTC 跨日。
+ */
 export const createLatestReminder = (
   { locale, location }: { locale: Locale; location: UserLocation | null },
   now = new Date()

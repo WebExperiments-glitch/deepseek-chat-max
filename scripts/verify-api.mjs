@@ -13,6 +13,8 @@
  * Key 只从环境变量读取，不落盘、不打印。
  */
 
+import { formatCacheHitPercent } from './lib/cache-hit.mjs'
+
 const ORIGIN = 'https://api.deepseek.com'
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-flash'
 const key = process.env.DEEPSEEK_API_KEY
@@ -23,15 +25,7 @@ if (!key) {
 
 const headers = { 'x-api-key': key, 'Content-Type': 'application/json' }
 
-/** 与应用 usageStats.formatCacheHitPercent 完全一致的算法 */
-const formatCacheHitPercent = (cacheRead, prompt) => {
-  if (prompt <= 0) return null
-  if (cacheRead >= prompt) return '100'
-  const one = ((cacheRead / prompt) * 100).toFixed(1)
-  if (Number(one) < 99.95) return one
-  const two = ((cacheRead / prompt) * 100).toFixed(2)
-  return two === '100.00' ? '>99.99' : two
-}
+// 命中率算法与 src/services/chat/usageStats.ts 保持一致，实现在共享的 scripts/lib/cache-hit.mjs
 
 const usageLine = (usage) => {
   if (!usage) return 'usage: (none)'

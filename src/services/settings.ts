@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import type { TtsVoice } from './api/speech.js'
 import {
+  getProvider,
   isProviderId,
-  PROVIDERS,
   PROVIDER_IDS,
   supportsDeepseekFeatures,
   type ProviderId,
@@ -20,6 +20,30 @@ export type ThemePreference = 'light' | 'dark' | 'system'
 export type EffortLevel = 'low' | 'high' | 'max'
 
 export const EFFORT_LEVELS: EffortLevel[] = ['low', 'high', 'max']
+
+/** 阅读宽度：标准或更宽的消息列 */
+export type ReadingWidth = 'standard' | 'wide'
+
+/** 发送快捷键：Enter 发送，或 Ctrl/⌘+Enter 发送 */
+export type SendShortcut = 'enter' | 'mod-enter'
+
+/** 明暗主题各自的外观配色；空串表示使用默认样式 */
+export type AppearanceColors = {
+  userBubble: string
+  assistantBubble: string
+  /** 对话区背景，可填颜色、渐变或 url(...) */
+  chatBackground: string
+}
+
+export type Appearance = {
+  light: AppearanceColors
+  dark: AppearanceColors
+}
+
+const emptyAppearance = (): Appearance => ({
+  light: { userBubble: '', assistantBubble: '', chatBackground: '' },
+  dark: { userBubble: '', assistantBubble: '', chatBackground: '' },
+})
 
 /** 各服务商的 API Key；没有配置时为 null */
 export type ProviderApiKeys = Record<ProviderId, string | null>
@@ -40,6 +64,7 @@ type Settings = {
   location: UserLocation | null
   ttsVoice: TtsVoice
   thinking: boolean
+  /** 智能搜索开关。搜索/看网页的轮数不做固定档位，交给模型判断或用户在提问里显式指定。 */
   search: boolean
   /** 采样温度 0–2；思考模式下服务端自行处理 */
   temperature: number
@@ -61,8 +86,11 @@ type Settings = {
   customSystemPrompt: string
   /** 上下文压力达到阈值时自动压缩较早轮次 */
   autoCompress: boolean
-  /** 本地长期记忆（全局，跨会话） */
-  memoryEnabled: boolean
+  /** 本地长期记忆：读取（注入请求）与写入（自动抽取）分开控制 */
+  /** 是否把记忆注入请求（读取） */
+  memoryReadEnabled: boolean
+  /** 是否在回复后自动抽取记忆（写入） */
+  memoryWriteEnabled: boolean
   /** 是否开启安全审核（safety_check） */
   safetyCheck: boolean
   /** 是否把当前时间写进请求上下文 */
@@ -72,6 +100,24 @@ type Settings = {
   /** 自定义品牌文字；空串回落到默认应用名 */
   brandText: string
   siderCollapsed: boolean
+  /** 要求模型返回合法 JSON 对象（response_format） */
+  jsonMode: boolean
+  /** OpenAI 格式的 tools JSON 数组；空串表示不启用函数调用 */
+  toolsJson: string
+  /** 消息列宽度 */
+  readingWidth: ReadingWidth
+  /** 代码块自动换行 */
+  codeWrap: boolean
+  /** 超过一定行数的代码块默认折叠 */
+  codeCollapse: boolean
+  /** 发送快捷键 */
+  sendShortcut: SendShortcut
+  /** 用户头像：data URL 或图片地址；空串表示不显示 */
+  userAvatar: string
+  /** 助手头像：data URL 或图片地址；空串表示不显示 */
+  assistantAvatar: string
+  /** 明暗独立的外观配色 */
+  appearance: Appearance
 }
 
 const KEYS = {
@@ -96,12 +142,23 @@ const KEYS = {
   showRefusalDetail: 'chat-demo:show-refusal-detail',
   customSystemPrompt: 'chat-demo:custom-system-prompt',
   autoCompress: 'chat-demo:auto-compress',
-  memoryEnabled: 'chat-demo:memory-enabled',
+  legacyMemoryEnabled: 'chat-demo:memory-enabled',
+  memoryReadEnabled: 'chat-demo:memory-read',
+  memoryWriteEnabled: 'chat-demo:memory-write',
   safetyCheck: 'chat-demo:safety-check',
   timeContext: 'chat-demo:time-context',
   brandMode: 'chat-demo:brand-mode',
   brandText: 'chat-demo:brand-text',
   siderCollapsed: 'chat-demo:sider-collapsed',
+  jsonMode: 'chat-demo:json-mode',
+  toolsJson: 'chat-demo:tools-json',
+  readingWidth: 'chat-demo:reading-width',
+  codeWrap: 'chat-demo:code-wrap',
+  codeCollapse: 'chat-demo:code-collapse',
+  sendShortcut: 'chat-demo:send-shortcut',
+  userAvatar: 'chat-demo:user-avatar',
+  assistantAvatar: 'chat-demo:assistant-avatar',
+  appearance: 'chat-demo:appearance',
 } as const
 
 const read = readStorage
@@ -229,6 +286,18 @@ const initialNumber = (key: string, fallback: number, min: number, max: number):
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
 }
 
+/**
+ * 搜索开关初始值。兼容旧版的 search-rounds 档位键：轮数 > 0 视为开启，
+ * 之后统一只用 search:boolean，轮数不再做固定档位。
+ */
+const initialSearchEnabled = (): boolean => {
+  const legacy = read('chat-demo:search-rounds')
+  if (legacy !== null) {
+    return Number(legacy) > 0
+  }
+  return read(KEYS.search) === 'true'
+}
+
 /** 读可留空的数值设置：缺失、非法或非正数时为 null，表示使用服务端默认值 */
 const initialOptionalNumber = (key: string, min: number, max: number): number | null => {
   const raw = read(key)
@@ -242,6 +311,52 @@ const initialOptionalNumber = (key: string, min: number, max: number): number | 
   return Math.min(max, Math.round(value))
 }
 
+/** 外观配色：缺失或损坏时使用空配色 */
+const initialAppearance = (): Appearance => {
+  const base = emptyAppearance()
+  const raw = read(KEYS.appearance)
+  if (!raw) {
+    return base
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object') {
+      return base
+    }
+    const record = parsed as Record<string, unknown>
+    const pick = (theme: 'light' | 'dark'): AppearanceColors => {
+      const value = record[theme]
+      if (value === null || typeof value !== 'object') {
+        return base[theme]
+      }
+      const colors = value as Record<string, unknown>
+      return {
+        userBubble: typeof colors.userBubble === 'string' ? colors.userBubble : '',
+        assistantBubble:
+          typeof colors.assistantBubble === 'string' ? colors.assistantBubble : '',
+        chatBackground: typeof colors.chatBackground === 'string' ? colors.chatBackground : '',
+      }
+    }
+    return { light: pick('light'), dark: pick('dark') }
+  } catch {
+    return base
+  }
+}
+
+/** 旧版只有一个总开关：拆分读写后分别继承旧值，未设置过时默认开启 */
+const initialMemoryFlags = (): { read: boolean; write: boolean } => {
+  const legacy = read(KEYS.legacyMemoryEnabled)
+  const fallback = legacy === null ? true : legacy !== 'false'
+  const readSaved = read(KEYS.memoryReadEnabled)
+  const writeSaved = read(KEYS.memoryWriteEnabled)
+  return {
+    read: readSaved === null ? fallback : readSaved !== 'false',
+    write: writeSaved === null ? fallback : writeSaved !== 'false',
+  }
+}
+
+const initialMemory = initialMemoryFlags()
+
 export const useSettings = create<Settings>(() => ({
   provider: initialProvider(),
   apiKeys: initialApiKeys(),
@@ -251,7 +366,7 @@ export const useSettings = create<Settings>(() => ({
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
   thinking: read(KEYS.thinking) === 'true',
-  search: read(KEYS.search) === 'true',
+  search: initialSearchEnabled(),
   temperature: initialNumber(KEYS.temperature, 1, 0, 2),
   topP: initialNumber(KEYS.topP, 1, 0.01, 1),
   maxTokens: initialOptionalNumber(KEYS.maxTokens, 1, 65536),
@@ -263,12 +378,23 @@ export const useSettings = create<Settings>(() => ({
   customSystemPrompt: read(KEYS.customSystemPrompt) ?? '',
   // 默认开启：窗口较大的模型很少触发，窗口小的模型才是真正需要它的场景
   autoCompress: read(KEYS.autoCompress) !== 'false',
-  memoryEnabled: read(KEYS.memoryEnabled) !== 'false',
+  memoryReadEnabled: initialMemory.read,
+  memoryWriteEnabled: initialMemory.write,
   safetyCheck: read(KEYS.safetyCheck) !== 'false',
   timeContext: read(KEYS.timeContext) !== 'false',
   brandMode: read(KEYS.brandMode) === 'text' ? 'text' : 'logo',
   brandText: read(KEYS.brandText) ?? '',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
+  jsonMode: read(KEYS.jsonMode) === 'true',
+  toolsJson: read(KEYS.toolsJson) ?? '',
+  readingWidth: read(KEYS.readingWidth) === 'wide' ? 'wide' : 'standard',
+  codeWrap: read(KEYS.codeWrap) === 'true',
+  // 长代码块默认折叠，喜欢直接看全文可以在设置里关掉
+  codeCollapse: read(KEYS.codeCollapse) !== 'false',
+  sendShortcut: read(KEYS.sendShortcut) === 'mod-enter' ? 'mod-enter' : 'enter',
+  userAvatar: read(KEYS.userAvatar) ?? '',
+  assistantAvatar: read(KEYS.assistantAvatar) ?? '',
+  appearance: initialAppearance(),
 }))
 
 /** 当前服务商的 Key；没有配置时为空串，调用方按空串处理 */
@@ -283,7 +409,7 @@ export const getDeepseekApiKey = (): string => useSettings.getState().apiKeys.de
 /** 当前服务商实际使用的模型：用户选择过就用选择，否则用默认模型 */
 export const getCurrentModel = (): string => {
   const { provider, models } = useSettings.getState()
-  return models[provider] || PROVIDERS[provider].defaultModel
+  return models[provider] || getProvider(provider).defaultModel
 }
 
 export const setLocale = (locale: Locale) => {
@@ -315,7 +441,10 @@ export const setProvider = (provider: ProviderId) => {
   if (resetSearch) {
     write(KEYS.search, 'false')
   }
-  useSettings.setState({ provider, ...(resetSearch ? { search: false } : {}) })
+  useSettings.setState({
+    provider,
+    ...(resetSearch ? { search: false } : {}),
+  })
 }
 
 export const setProviderApiKey = (provider: ProviderId, apiKey: string | null) => {
@@ -363,6 +492,65 @@ export const setMaxTokens = (maxTokens: number | null) => {
 export const setShowRefusalDetail = (showRefusalDetail: boolean) => {
   write(KEYS.showRefusalDetail, String(showRefusalDetail))
   useSettings.setState({ showRefusalDetail })
+}
+
+export const setJsonMode = (jsonMode: boolean) => {
+  write(KEYS.jsonMode, String(jsonMode))
+  useSettings.setState({ jsonMode })
+}
+
+export const setToolsJson = (toolsJson: string) => {
+  write(KEYS.toolsJson, toolsJson)
+  useSettings.setState({ toolsJson })
+}
+
+export const setReadingWidth = (readingWidth: ReadingWidth) => {
+  write(KEYS.readingWidth, readingWidth)
+  useSettings.setState({ readingWidth })
+}
+
+export const setCodeWrap = (codeWrap: boolean) => {
+  write(KEYS.codeWrap, String(codeWrap))
+  useSettings.setState({ codeWrap })
+}
+
+export const setCodeCollapse = (codeCollapse: boolean) => {
+  write(KEYS.codeCollapse, String(codeCollapse))
+  useSettings.setState({ codeCollapse })
+}
+
+export const setSendShortcut = (sendShortcut: SendShortcut) => {
+  write(KEYS.sendShortcut, sendShortcut)
+  useSettings.setState({ sendShortcut })
+}
+
+export const setUserAvatar = (userAvatar: string) => {
+  write(KEYS.userAvatar, userAvatar === '' ? null : userAvatar)
+  useSettings.setState({ userAvatar })
+}
+
+export const setAssistantAvatar = (assistantAvatar: string) => {
+  write(KEYS.assistantAvatar, assistantAvatar === '' ? null : assistantAvatar)
+  useSettings.setState({ assistantAvatar })
+}
+
+export const setAppearanceColor = (
+  theme: 'light' | 'dark',
+  key: keyof AppearanceColors,
+  value: string
+) => {
+  const appearance: Appearance = {
+    ...useSettings.getState().appearance,
+    [theme]: { ...useSettings.getState().appearance[theme], [key]: value },
+  }
+  write(KEYS.appearance, JSON.stringify(appearance))
+  useSettings.setState({ appearance })
+}
+
+export const resetAppearance = (theme: 'light' | 'dark') => {
+  const appearance: Appearance = { ...useSettings.getState().appearance, [theme]: emptyAppearance()[theme] }
+  write(KEYS.appearance, JSON.stringify(appearance))
+  useSettings.setState({ appearance })
 }
 
 export const setImageDetail = (imageDetail: ImageDetail) => {
@@ -422,9 +610,14 @@ export const setTimeContext = (timeContext: boolean) => {
   useSettings.setState({ timeContext })
 }
 
-export const setMemoryEnabled = (memoryEnabled: boolean) => {
-  write(KEYS.memoryEnabled, String(memoryEnabled))
-  useSettings.setState({ memoryEnabled })
+export const setMemoryReadEnabled = (memoryReadEnabled: boolean) => {
+  write(KEYS.memoryReadEnabled, String(memoryReadEnabled))
+  useSettings.setState({ memoryReadEnabled })
+}
+
+export const setMemoryWriteEnabled = (memoryWriteEnabled: boolean) => {
+  write(KEYS.memoryWriteEnabled, String(memoryWriteEnabled))
+  useSettings.setState({ memoryWriteEnabled })
 }
 
 export const setSiderCollapsed = (siderCollapsed: boolean) => {

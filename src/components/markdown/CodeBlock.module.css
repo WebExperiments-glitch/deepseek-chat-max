@@ -6,6 +6,60 @@
   padding: 6px;
 }
 
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* 长代码块折叠：固定最大高度 + 底部渐变遮罩 */
+.preWrapper {
+  position: relative;
+}
+
+.codeRow {
+  display: flex;
+  align-items: flex-start;
+
+  > pre {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* 行号：不随代码横向滚动 */
+.lineNumbers {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  padding: 16px 6px 16px 12px;
+  text-align: right;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsl-code-block-content-font);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.clipped {
+  max-height: 340px;
+  overflow: hidden;
+}
+
+.fade {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 64px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--dsw-alias-markdown-code-block)
+  );
+  pointer-events: none;
+}
+
 .name {
   margin-left: 8px;
   color: var(--dsw-alias-label-primary);

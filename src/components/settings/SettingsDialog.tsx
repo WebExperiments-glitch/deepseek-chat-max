@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
@@ -27,13 +27,19 @@ import {
   setAutoCompress,
   setBrandMode,
   setBrandText,
+  setCodeCollapse,
+  setCodeWrap,
   setCustomSystemPrompt,
   setDeepseekProtocol,
   setEffort,
   setImageDetail,
+  setJsonMode,
+  setReadingWidth,
   setSafetyCheck,
+  setSendShortcut,
   setShowRefusalDetail,
   setTimeContext,
+  setToolsJson,
   setUserId,
   type EffortLevel,
   setLocale,
@@ -55,11 +61,21 @@ import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
 import { ParamControl } from './ParamControls.js'
 import paramStyles from './ParamControls.module.css'
 import { ProviderSetting } from './ProviderSetting.js'
-import { OFFICIAL_SYSTEM_PROMPT } from '../../services/chat/systemPrompt.js'
+import { AppearanceSetting } from './AppearanceSetting.js'
 import { createLatestReminder } from '../../services/chat/latestReminder.js'
 import { useModels } from '../../services/models.js'
+import { getBalance, type DeepseekBalance } from '../../services/api/client.js'
+import {
+  deleteShare,
+  listShares,
+  shareLink,
+  type ShareMeta,
+} from '../../services/shares.js'
 import { MemoryPanel } from '../memory/MemoryPanel.js'
 import { FilesManager } from './FilesManager.js'
+import { PresetManager } from './PresetManager.js'
+import { PromptPreview } from './PromptPreview.js'
+import { UsagePanel } from './UsagePanel.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import styles from './Settings.module.css'
 
@@ -87,6 +103,11 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
     value: 'memory',
     label: 'settingDialogAsideMemoryOptionLabel',
     icon: <IconThinkOutline16 />,
+  },
+  {
+    value: 'advanced',
+    label: 'settingsAdvancedSection',
+    icon: <IconSettingsOutline16 />,
   },
   { value: 'data', label: 'settingDialogAsideDataOptionLabel', icon: <IconDataOutline16 /> },
 ]
@@ -135,6 +156,7 @@ const SettingsContent = () => {
             <>
               <BrandSetting />
               <ThemeSetting />
+              <AppearanceSetting />
               <LocaleSetting />
               <TtsVoiceSetting />
               <LocationSetting />
@@ -143,13 +165,18 @@ const SettingsContent = () => {
             <ChatSettings />
           ) : section === 'memory' ? (
             <MemoryPanel />
+          ) : section === 'advanced' ? (
+            <AdvancedSettings />
           ) : (
             <>
               <ProviderSetting />
               <ApiKeyField editor={apiKeyEditor} />
+              <BalanceCell />
+              <UsagePanel />
               <FilesManager />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
+              <ShareLinksManager />
               <SettingCell
                 label={t('deleteAllSessions')}
                 status={null}
@@ -256,46 +283,20 @@ const useHistoryDelete = () => {
 const ChatSettings = () => {
   const t = useTranslate()
   const promptId = useId()
-  const temperature = useSettings((state) => state.temperature)
-  const topP = useSettings((state) => state.topP)
-  const maxTokens = useSettings((state) => state.maxTokens)
   const customSystemPrompt = useSettings((state) => state.customSystemPrompt)
-  const userId = useSettings((state) => state.userId)
   const imageDetail = useSettings((state) => state.imageDetail)
   const safetyCheck = useSettings((state) => state.safetyCheck)
   const timeContext = useSettings((state) => state.timeContext)
-  const showRefusalDetail = useSettings((state) => state.showRefusalDetail)
-  const deepseekProtocol = useSettings((state) => state.deepseekProtocol)
   const autoCompress = useSettings((state) => state.autoCompress)
-  const provider = useSettings((state) => state.provider)
-  const model = useSettings((state) => state.models[state.provider]) ?? ''
-  const effort = useSettings((state) => state.effort)
-  // 模型清单给出的能力优先；清单没给时按文档的默认档位与输出上限
-  const listed = useModels((state) => state.lists[provider].find((option) => option.id === model))
-  const effortLevels = listed?.effortLevels ?? EFFORT_LEVELS
-  const maxOutput = listed?.maxOutputTokens ?? 393216
+  const readingWidth = useSettings((state) => state.readingWidth)
+  const codeWrap = useSettings((state) => state.codeWrap)
+  const codeCollapse = useSettings((state) => state.codeCollapse)
+  const sendShortcut = useSettings((state) => state.sendShortcut)
   return (
     <>
-      {/* DeepSeek 的两套协议：Messages（默认）与 Responses */}
-      <SettingCell
-        label={t('settingsApiProtocol')}
-        description={t('settingsApiProtocolDescription')}
-        status={null}
-        action={
-          <Select
-            ariaLabel={t('settingsApiProtocol')}
-            className={styles.effortSelect}
-            value={deepseekProtocol}
-            options={[
-              { value: 'messages', label: t('protocolMessages') },
-              { value: 'responses', label: t('protocolResponses') },
-            ]}
-            onChange={(value) => setDeepseekProtocol(value as 'messages' | 'responses')}
-          />
-        }
-      />
-
-      {/* 自定义系统提示词：留空即官方身份说明，压缩摘要会自动接在末尾 */}
+      <PresetManager />
+      <PromptPreview />
+      {/* 默认提示词：没有启用预设时才生效；预设会覆盖这里 */}
       <div className={paramStyles.promptCell}>
         <label className={paramStyles.promptLabel} htmlFor={promptId}>
           {t('settingsSystemPrompt')}
@@ -304,13 +305,12 @@ const ChatSettings = () => {
         <textarea
           id={promptId}
           className={paramStyles.promptArea}
-          rows={4}
+          rows={3}
           value={customSystemPrompt}
-          placeholder={OFFICIAL_SYSTEM_PROMPT}
+          placeholder={t('settingsSystemPromptPlaceholder')}
           onChange={(event) => setCustomSystemPrompt(event.target.value)}
         />
       </div>
-
       <SettingCell
         label={t('settingsSafetyCheck')}
         description={t('settingsSafetyCheckDescription')}
@@ -342,21 +342,6 @@ const ChatSettings = () => {
       />
 
       <SettingCell
-        label={t('settingsShowRefusalDetail')}
-        description={t('settingsShowRefusalDetailDescription')}
-        status={null}
-        action={
-          <input
-            type="checkbox"
-            className={paramStyles.checkbox}
-            checked={showRefusalDetail}
-            aria-label={t('settingsShowRefusalDetail')}
-            onChange={(event) => setShowRefusalDetail(event.target.checked)}
-          />
-        }
-      />
-
-      <SettingCell
         label={t('settingsImageDetail')}
         description={t('settingsImageDetailDescription')}
         status={null}
@@ -376,6 +361,154 @@ const ChatSettings = () => {
       />
 
       <SettingCell
+        label={t('settingsAutoCompress')}
+        description={t('settingsAutoCompressDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={autoCompress}
+            aria-label={t('settingsAutoCompress')}
+            onChange={(event) => setAutoCompress(event.target.checked)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('readingWidth')}
+        description={t('readingWidthDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('readingWidth')}
+            className={styles.effortSelect}
+            value={readingWidth}
+            options={[
+              { value: 'standard', label: t('readingWidthStandard') },
+              { value: 'wide', label: t('readingWidthWide') },
+            ]}
+            onChange={(value) => setReadingWidth(value as 'standard' | 'wide')}
+          />
+        }
+      />
+      <SettingCell
+        label={t('codeWrap')}
+        description={t('codeWrapDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={codeWrap}
+            aria-label={t('codeWrap')}
+            onChange={(event) => setCodeWrap(event.target.checked)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('codeCollapse')}
+        description={t('codeCollapseDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={codeCollapse}
+            aria-label={t('codeCollapse')}
+            onChange={(event) => setCodeCollapse(event.target.checked)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('sendShortcut')}
+        description={t('sendShortcutDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('sendShortcut')}
+            className={styles.effortSelect}
+            value={sendShortcut}
+            options={[
+              { value: 'enter', label: t('sendShortcutEnter') },
+              { value: 'mod-enter', label: t('sendShortcutModEnter') },
+            ]}
+            onChange={(value) => setSendShortcut(value as 'enter' | 'mod-enter')}
+          />
+        }
+      />
+    </>
+  )
+}
+
+/** 高级功能：开发者与进阶用户才用得上的设置，普通人不必碰 */
+const AdvancedSettings = () => {
+  const t = useTranslate()
+  const toolsId = useId()
+  const temperature = useSettings((state) => state.temperature)
+  const topP = useSettings((state) => state.topP)
+  const maxTokens = useSettings((state) => state.maxTokens)
+  const userId = useSettings((state) => state.userId)
+  const showRefusalDetail = useSettings((state) => state.showRefusalDetail)
+  const deepseekProtocol = useSettings((state) => state.deepseekProtocol)
+  const effort = useSettings((state) => state.effort)
+  const jsonMode = useSettings((state) => state.jsonMode)
+  const toolsJson = useSettings((state) => state.toolsJson)
+  const provider = useSettings((state) => state.provider)
+  const model = useSettings((state) => state.models[state.provider]) ?? ''
+  const [toolsError, setToolsError] = useState(false)
+  const listed = useModels((state) => state.lists[provider].find((option) => option.id === model))
+  const effortLevels = listed?.effortLevels ?? EFFORT_LEVELS
+  const maxOutput = listed?.maxOutputTokens ?? 393216
+  return (
+    <>
+      <p className={styles.sectionIntro}>{t('advancedSettingsIntro')}</p>
+      {/* 协议切换：Responses 下部分能力（如联网工具）不可用 */}
+      <SettingCell
+        label={t('settingsApiProtocol')}
+        description={t('settingsApiProtocolDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('settingsApiProtocol')}
+            className={styles.effortSelect}
+            value={deepseekProtocol}
+            options={[
+              { value: 'messages', label: t('protocolMessages') },
+              { value: 'responses', label: t('protocolResponses') },
+            ]}
+            onChange={(value) => setDeepseekProtocol(value as 'messages' | 'responses')}
+          />
+        }
+      />
+      <SettingCell
+        label={t('jsonMode')}
+        description={t('jsonModeDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={jsonMode}
+            aria-label={t('jsonMode')}
+            onChange={(event) => setJsonMode(event.target.checked)}
+          />
+        }
+      />
+      <SettingCell
+        label={t('settingsShowRefusalDetail')}
+        description={t('settingsShowRefusalDetailDescription')}
+        status={null}
+        action={
+          <input
+            type="checkbox"
+            className={paramStyles.checkbox}
+            checked={showRefusalDetail}
+            aria-label={t('settingsShowRefusalDetail')}
+            onChange={(event) => setShowRefusalDetail(event.target.checked)}
+          />
+        }
+      />
+      <SettingCell
         label={t('settingsUserId')}
         description={t('settingsUserIdDescription')}
         status={null}
@@ -389,18 +522,20 @@ const ChatSettings = () => {
           />
         }
       />
-
       <SettingCell
-        label={t('settingsAutoCompress')}
-        description={t('settingsAutoCompressDescription')}
+        label={t('settingsEffort')}
+        description={t('settingsEffortDescription')}
         status={null}
         action={
-          <input
-            type="checkbox"
-            className={paramStyles.checkbox}
-            checked={autoCompress}
-            aria-label={t('settingsAutoCompress')}
-            onChange={(event) => setAutoCompress(event.target.checked)}
+          <Select
+            ariaLabel={t('settingsEffort')}
+            className={styles.effortSelect}
+            value={effort ?? ''}
+            options={[
+              { value: '', label: t('settingsEffortDefault') },
+              ...effortLevels.map((level) => ({ value: level, label: level })),
+            ]}
+            onChange={(value) => setEffort(value === '' ? null : (value as EffortLevel))}
           />
         }
       />
@@ -437,23 +572,6 @@ const ChatSettings = () => {
         }
       />
       <SettingCell
-        label={t('settingsEffort')}
-        description={t('settingsEffortDescription')}
-        status={null}
-        action={
-          <Select
-            ariaLabel={t('settingsEffort')}
-            className={styles.effortSelect}
-            value={effort ?? ''}
-            options={[
-              { value: '', label: t('settingsEffortDefault') },
-              ...effortLevels.map((level) => ({ value: level, label: level })),
-            ]}
-            onChange={(value) => setEffort(value === '' ? null : (value as EffortLevel))}
-          />
-        }
-      />
-      <SettingCell
         label={t('settingsMaxTokens')}
         description={t('settingsMaxTokensDescription')}
         status={null}
@@ -463,7 +581,6 @@ const ChatSettings = () => {
             label={t('settingsMaxTokens')}
             value={maxTokens}
             min={1}
-            // 上限取模型清单的 max_output_tokens（393216），清单未知时按文档默认
             max={maxOutput}
             step={1}
             optional
@@ -471,6 +588,40 @@ const ChatSettings = () => {
           />
         }
       />
+      {/* 函数调用：保存前校验 JSON 数组，避免无效定义发给服务端 */}
+      <div className={paramStyles.promptCell}>
+        <label className={paramStyles.promptLabel} htmlFor={toolsId}>
+          {t('settingsTools')}
+        </label>
+        <p className={paramStyles.promptDescription}>{t('settingsToolsDescription')}</p>
+        <textarea
+          id={toolsId}
+          className={paramStyles.promptArea}
+          rows={6}
+          defaultValue={toolsJson}
+          placeholder={t('settingsToolsPlaceholder')}
+          spellCheck={false}
+          onBlur={(event) => {
+            const value = event.target.value.trim()
+            if (!value) {
+              setToolsError(false)
+              setToolsJson('')
+              return
+            }
+            try {
+              const parsed: unknown = JSON.parse(value)
+              if (!Array.isArray(parsed)) {
+                throw new Error('not an array')
+              }
+              setToolsError(false)
+              setToolsJson(value)
+            } catch {
+              setToolsError(true)
+            }
+          }}
+        />
+        {toolsError ? <p className={styles.error}>{t('settingsToolsInvalid')}</p> : null}
+      </div>
     </>
   )
 }
@@ -717,6 +868,161 @@ const errorStatus = (key: TranslationKey, error: unknown): Status => ({
     : { params: { message: error instanceof Error ? error.message : String(error) } }),
   error: true,
 })
+
+/** DeepSeek 账户余额：进入设置时自动查询，可手动刷新 */
+const BalanceCell = () => {
+  const t = useTranslate()
+  const provider = useSettings((state) => state.provider)
+  const apiKey = useSettings((state) => state.apiKeys.deepseek)
+  const [balance, setBalance] = useState<DeepseekBalance | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!apiKey) {
+      return
+    }
+    setBusy(true)
+    setFailed(false)
+    try {
+      setBalance(await getBalance(apiKey))
+    } catch {
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }, [apiKey])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  if (provider !== 'deepseek' || !apiKey) {
+    return null
+  }
+  const info = balance?.balance_infos?.[0]
+  const description = busy
+    ? t('balanceLoading')
+    : info
+      ? `${t('balanceTotal')} ${info.total_balance} ${info.currency} · ${t('balanceGranted')} ${info.granted_balance} · ${t('balanceToppedUp')} ${info.topped_up_balance}`
+      : failed
+        ? t('balanceFailed')
+        : t('balanceUnavailable')
+
+  return (
+    <SettingCell
+      label={t('balanceTitle')}
+      description={description}
+      status={null}
+      action={
+        <Button variant="outlined" size="m" disabled={busy} onClick={() => void load()}>
+          {t('balanceRefresh')}
+        </Button>
+      }
+    />
+  )
+}
+
+const ShareLinksManager = () => {
+  const t = useTranslate()
+  const [shares, setShares] = useState<ShareMeta[] | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<ShareMeta | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listShares()
+      .then((list) => {
+        if (!cancelled) {
+          setShares(list)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setShares([])
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const copy = async (share: ShareMeta) => {
+    await navigator.clipboard.writeText(shareLink(share.id)).catch(() => undefined)
+    showToast({ key: 'shareLinkCopied' })
+  }
+
+  const remove = async () => {
+    if (!confirm) {
+      return
+    }
+    setBusyId(confirm.id)
+    try {
+      await deleteShare(confirm.id)
+      setShares((list) => list?.filter((item) => item.id !== confirm.id) ?? [])
+      showToast({ key: 'shareDeleted' })
+    } catch {
+      showToast({ key: 'historyDeleteFailed', type: 'error' })
+    } finally {
+      setBusyId(null)
+      setConfirm(null)
+    }
+  }
+
+  return (
+    <div className={styles.shareBlock}>
+      <div className={styles.shareBlockTitle}>{t('shareManageTitle')}</div>
+      {shares === null ? (
+        <div className={styles.shareEmpty}>{t('shareLoading')}</div>
+      ) : shares.length === 0 ? (
+        <div className={styles.shareEmpty}>{t('shareManageEmpty')}</div>
+      ) : (
+        <div className={styles.shareList}>
+          {shares.map((share) => (
+            <div key={share.id} className={styles.shareRow}>
+              <div className={styles.shareInfo}>
+                <div className={styles.shareTitle}>{share.title || t('untitledChat')}</div>
+                <div className={styles.shareMeta}>
+                  {t('shareMessageCount', { count: share.count })} ·{' '}
+                  {new Date(share.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <Button variant="outlined" size="s" onClick={() => void copy(share)}>
+                {t('copy')}
+              </Button>
+              <Button
+                variant="dangerOutlined"
+                size="s"
+                disabled={busyId === share.id}
+                onClick={() => setConfirm(share)}
+              >
+                {t('delete')}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {confirm ? (
+        <Modal
+          title={t('shareManageTitle')}
+          onClose={() => setConfirm(null)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setConfirm(null)}>
+                {t('cancel')}
+              </Button>
+              <Button variant="danger" disabled={busyId !== null} onClick={() => void remove()}>
+                {t('delete')}
+              </Button>
+            </>
+          }
+        >
+          {t('shareDeleteConfirm')}
+        </Modal>
+      ) : null}
+    </div>
+  )
+}
 
 const SettingCell = ({
   label,

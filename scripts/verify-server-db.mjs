@@ -41,7 +41,7 @@ test('会话读写与重命名', () => {
 test('会话置顶只影响排序且不会被保存覆盖', () => {
   db.putSession(session('s1', '旧标题'))
   db.putSession(session('s2', '新标题'))
-  assert.equal(db.setSessionPinned('s1', true), true)
+  assert.equal(db.setSessionPinned('s1', true), 'ok')
   assert.deepEqual(db.listSessions().map((item) => item.id), ['s1', 's2'])
   assert.equal(db.listSessions()[0].pinned, true)
 
@@ -104,6 +104,27 @@ test('导入暂存原子替换正式数据', () => {
   assert.equal(Buffer.from(db.getFile('f2').data).toString(), 'staged')
 })
 
+test('归档导入保留置顶与文件夹归属', () => {
+  db.createFolder({ id: 'import-folder', name: '导入归档', createdAt: 1 })
+  db.clearStaging()
+  db.putStagingSession({
+    ...session('imported', '导入会话'),
+    pinned: true,
+    folderId: 'import-folder',
+  })
+  const summaries = db.commitStaging()
+  const summary = summaries.find((item) => item.id === 'imported')
+  assert.equal(summary.pinned, true)
+  assert.equal(summary.folderId, 'import-folder')
+  const listed = db.listSessions().find((item) => item.id === 'imported')
+  assert.equal(listed.pinned, true)
+  assert.equal(listed.folderId, 'import-folder')
+  // 清理置顶状态，避免占用后续「置顶上限」用例的名额
+  db.setSessionPinned('imported', false)
+  db.deleteSession('imported')
+  db.deleteFolder('import-folder')
+})
+
 test('旧记录导入', () => {
   db.clearMemories()
   db.importRecords({
@@ -112,6 +133,85 @@ test('旧记录导入', () => {
   })
   assert.equal(db.getSession('legacy').title, '导入会话')
   assert.equal(db.getMeta('legacy_imported'), '1')
+})
+
+test('全文搜索命中用户与助手正文，不索引思考块', () => {
+  db.putSession({
+    id: 'search-1',
+    title: '搜索测试',
+    createdAt: 1,
+    updatedAt: 3,
+    messages: [
+      { id: 'u1', role: 'user', content: '请解释量子纠缠', files: [], createdAt: 1 },
+      {
+        id: 'a1',
+        role: 'assistant',
+        blocks: [
+          { type: 'thinking', thinking: '内部推理不应被搜索' },
+          { type: 'text', text: '量子纠缠是一种关联现象' },
+        ],
+        createdAt: 2,
+      },
+    ],
+  })
+  const results = db.searchMessages('量子纠缠')
+  assert.ok(results.some((item) => item.messageId === 'u1'))
+  assert.ok(results.some((item) => item.messageId === 'a1' && item.match === '量子纠缠'))
+  assert.equal(db.searchMessages('内部推理').length, 0)
+})
+
+test('分享快照独立保存，删除原会话后链接失效', () => {
+  db.putSession(session('share-src', '分享测试'))
+  const share = db.createShare({
+    id: 'shtest',
+    sessionId: 'share-src',
+    title: '分享测试',
+    messages: [{ id: 'u1', role: 'user', content: '你好', createdAt: 1 }],
+    createdAt: 5,
+  })
+  assert.equal(share.count, 1)
+  assert.equal(db.getShare('shtest').messages[0].content, '你好')
+  assert.equal(db.listShares().length, 1)
+  db.deleteSession('share-src')
+  assert.equal(db.getShare('shtest'), null)
+  assert.equal(db.listShares().length, 0)
+})
+
+test('置顶达到上限后拒绝新的置顶', () => {
+  for (let index = 0; index < db.PIN_LIMIT; index += 1) {
+    db.putSession(session(`pin-${index}`, `置顶 ${index}`))
+    assert.equal(db.setSessionPinned(`pin-${index}`, true), 'ok')
+  }
+  db.putSession(session('pin-extra', '超出上限'))
+  assert.equal(db.setSessionPinned('pin-extra', true), 'limit')
+  assert.equal(db.setSessionPinned('pin-0', true), 'ok')
+})
+
+test('文件夹归档不会被保存正文覆盖，删除后回到未归档', () => {
+  db.createFolder({ id: 'folder-1', name: '工作', createdAt: 1 })
+  db.putSession(session('folder-session', '归档会话'))
+  assert.equal(db.setSessionFolder('folder-session', 'folder-1'), 'ok')
+  assert.equal(
+    db.listSessions().find((item) => item.id === 'folder-session').folderId,
+    'folder-1'
+  )
+
+  // 保存正文（保存消息、重命名）不应清空 folderId
+  db.putSession(session('folder-session', '改名后'))
+  assert.equal(
+    db.listSessions().find((item) => item.id === 'folder-session').folderId,
+    'folder-1'
+  )
+  assert.equal(db.renameFolder('folder-1', '工作资料'), true)
+  assert.equal(db.listFolders()[0].name, '工作资料')
+  assert.equal(db.setSessionFolder('folder-session', 'missing'), 'folder-missing')
+
+  assert.equal(db.deleteFolder('folder-1'), true)
+  assert.equal(
+    db.listSessions().find((item) => item.id === 'folder-session').folderId,
+    null
+  )
+  assert.equal(db.listFolders().length, 0)
 })
 
 test.after(() => {

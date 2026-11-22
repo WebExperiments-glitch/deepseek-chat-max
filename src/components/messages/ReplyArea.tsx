@@ -8,6 +8,7 @@ import {
   IconChevronRightOutline14,
   IconCheckedOutline14,
   IconCloseFill14,
+  IconCopyOutline16,
   IconLinkOutline16,
   IconRightUpOutline14,
   IconSearchOutline16,
@@ -31,7 +32,10 @@ import {
 import { Tooltip } from '../base/Tooltip.js'
 import { Markdown } from '../markdown/Markdown.js'
 import { SiteThumbnails } from '../search/SiteLogo.js'
+import { Shimmer } from '../base/Shimmer.js'
 import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js'
+import { showToast } from '../base/toastState.js'
+import { copyText } from '../../utils/clipboard.js'
 import styles from './ReplyArea.module.css'
 import './thinking.markdown.css'
 
@@ -64,7 +68,7 @@ export const ReplyArea = memo(function ReplyArea({
   streaming: boolean
   hasResponse: boolean
 }) {
-  useTranslate()
+  const t = useTranslate()
   const [open, setOpen] = useState(true)
   const titleActive = streaming && !hasResponse
   useTicker(titleActive, 1000)
@@ -75,31 +79,69 @@ export const ReplyArea = memo(function ReplyArea({
   const thinking = message.thinking ?? view.steps.some((step) => step.type === 'thinking')
   const title = thinking ? getAreaTitle(view, streaming, Date.now(), hasResponse) : null
   const stopped = !streaming && !hasResponse
+  const thinkingText = message.blocks
+    .filter((block) => block.type === 'thinking')
+    .map((block) => block.thinking)
+    .join('\n\n')
+  const steps = (
+    <div className={styles.steps}>
+      {view.steps.map((step, index) => (
+        <StepItem
+          key={stepKey(step, index)}
+          step={step}
+          message={message}
+          sources={view.sources}
+          streaming={streaming}
+          isLast={index === view.steps.length - 1}
+        />
+      ))}
+    </div>
+  )
+  const hasBody = view.steps.length > 0
   return (
     <div className={styles.area}>
       {title ? (
-        <div className={styles.title} onClick={() => setOpen((value) => !value)}>
+        <div
+          className={styles.title}
+          onClick={hasBody ? () => setOpen((value) => !value) : undefined}
+        >
           <span className={clsx(styles.titleIcon, stopped && styles.stoppedIcon)}>
             <IconThinkOutline16 />
           </span>
-          <span className={clsx(styles.titleText, titleActive && styles.shimmer)}>{title}</span>
-          {open ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
+          <Shimmer text={title} className={styles.titleText} active={titleActive} />
+          {!streaming && thinkingText ? (
+            <button
+              type="button"
+              className={styles.titleCopy}
+              aria-label={t('copyThinking')}
+              title={t('copyThinking')}
+              onClick={async (event) => {
+                event.stopPropagation()
+                showToast({
+                  key: (await copyText(thinkingText)) ? 'copied' : 'copyFailed',
+                })
+              }}
+            >
+              <IconCopyOutline16 />
+            </button>
+          ) : null}
+          {hasBody ? (
+            open ? (
+              <IconChevronDownOutline14 />
+            ) : (
+              <IconChevronRightOutline14 />
+            )
+          ) : null}
         </div>
       ) : null}
-      {open || !title ? (
-        <div className={styles.steps}>
-          {view.steps.map((step, index) => (
-            <StepItem
-              key={stepKey(step, index)}
-              step={step}
-              message={message}
-              sources={view.sources}
-              streaming={streaming}
-              isLast={index === view.steps.length - 1}
-            />
-          ))}
+      {title && hasBody ? (
+        // 官方折叠区：1fr ↔ 0fr 行高过渡，展开 ease-out、收起 ease-in
+        <div className={open ? styles.expanderOpen : styles.expanderCollapsed}>
+          <div className={styles.expanderInner}>{steps}</div>
         </div>
-      ) : null}
+      ) : title ? null : (
+        steps
+      )}
     </div>
   )
 })
@@ -127,10 +169,11 @@ const StepItem = ({
       const lastBlock = step.blocks.at(-1)
       const thinking =
         streaming && lastBlock?.startedAt !== undefined && lastBlock.endedAt === undefined
+      const content = step.blocks.map((block) => block.thinking).join('')
       return (
         <ContentItem isLast={isLast} active={thinking}>
           <Markdown
-            content={step.blocks.map((block) => block.thinking).join('')}
+            content={content}
             loading={thinking}
             cacheKey={`${message.id}-${step.key}`}
             disableLink
@@ -382,7 +425,7 @@ const ReadLinkRow = ({ step, isLast }: { step: ReadLinkStep; isLast: boolean }) 
   const t = useTranslate()
   return (
     <ToolRow icon={<IconLinkOutline16 />} isLast={isLast}>
-      <span className={clsx(styles.intro, styles.shimmer)}>{t('readingLink')}</span>
+      <Shimmer text={t('readingLink')} className={styles.intro} />
       {step.links.map((link) => (
         <PageLink key={link.id} page={link} />
       ))}

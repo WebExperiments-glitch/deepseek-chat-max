@@ -1,29 +1,42 @@
 import { streamMessage } from '../api/client.js'
 import type { CreateMessageRequest } from '../api/types.js'
-import type { Locale } from '../settings.js'
+import { getActivePresetPrompt } from '../presets.js'
+import { useSettings, type Locale } from '../settings.js'
 import { getVisibleMessages } from './branches.js'
+import { parseClientTools, toAnthropicTools } from './clientTools.js'
 import { reserveGeometry } from './contextPressure.js'
-import { getReplyAnswerText } from './reply.js'
-import type { Message, Session, SessionCompression } from './types.js'
+import { toRequestMessages } from './reply.js'
+import { serverTools } from './store/state.js'
+import { composeSystemPrompt } from './systemPrompt.js'
+import type {
+  AssistantMessage,
+  Message,
+  Session,
+  SessionCompression,
+  UserMessage,
+} from './types.js'
 
 /**
- * 长对话压缩：把较早的轮次交给模型总结成摘要，摘要进入后续请求的系统提示词，
+ * 长对话压缩：把较早的轮次交给模型总结成摘要，摘要进入后续请求的尾部，
  * 本地完整历史仍然保留（只在请求里跳过被摘要覆盖的部分），不删任何消息。
+ *
+ * 摘要请求复用对话的热前缀（对齐 DSH）：system、工具声明与被压缩区间的消息
+ * 逐字重放，只有尾部的摘要指令和输出是新的，这样压缩本身也能命中缓存。
  *
  * 摘要请求固定走 DeepSeek（与附件、语音、检索一致），因为它是后台工具，
  * 不应该因为换了对话服务商就失效；没有 DeepSeek Key 时压缩功能关闭。
  */
 
-/** 至少要有 5 轮才压缩，避免一上来就把对话抽干 */
+/** 至少要有 3 轮可被压缩的较早对话；加上始终保留的最近 2 轮，总共至少 5 轮才触发压缩 */
 const MIN_ROUNDS = 3
 /** 压缩时始终保留最近 2 轮原文 */
 const KEEP_ROUNDS = 2
 /** 上次压缩后新增多少轮才再自动压缩一次 */
 const AUTO_MIN_NEW_ROUNDS = 2
-/** 摘要请求的输入上限，避免一次塞入过长文本 */
-const MAX_TRANSCRIPT_CHARS = 48_000
 /** 摘要输出上限 */
 const SUMMARY_MAX_TOKENS = 1200
+/** 非 DeepSeek 对话或缺少模型快照时的摘要模型 */
+const FALLBACK_SUMMARY_MODEL = 'deepseek-flash'
 
 const running = new Set<string>()
 
@@ -68,55 +81,72 @@ export const autoCompressNeeded = (session: Session, pressure: AutoCompressInput
   return newRounds >= AUTO_MIN_NEW_ROUNDS
 }
 
-const messageText = (message: Message): string => {
-  if (message.role === 'user') {
-    return message.content
-  }
-  return message.role === 'assistant' ? getReplyAnswerText(message) : ''
-}
-
-/** 把要压缩的消息拼成带角色的纯文本，单条过长时截断 */
-const buildTranscript = (messages: Message[], locale: Locale): string => {
-  const userLabel = locale === 'zh-CN' ? '用户' : 'User'
-  const assistantLabel = locale === 'zh-CN' ? '助手' : 'Assistant'
-  const lines: string[] = []
-  let total = 0
-  for (const message of messages) {
-    const text = messageText(message).trim()
-    if (text === '') {
-      continue
-    }
-    const clipped = text.length > 4000 ? `${text.slice(0, 4000)}…` : text
-    const line = `${message.role === 'user' ? userLabel : assistantLabel}: ${clipped}`
-    if (total + line.length > MAX_TRANSCRIPT_CHARS) {
-      break
-    }
-    lines.push(line)
-    total += line.length + 1
-  }
-  return lines.join('\n\n')
-}
-
-const summarize = async (
-  apiKey: string,
-  transcript: string,
-  locale: Locale,
-  signal: AbortSignal
-): Promise<string> => {
-  const system =
+const summaryInstruction = (locale: Locale, previousSummary?: string): string => {
+  const base =
     locale === 'zh-CN'
-      ? '你是对话压缩器。把用户给出的对话记录压缩成结构化摘要，固定包含：1) 目标与约束；2) 已确认的事实、决定与结论；3) 代码/文件/产物的当前状态；4) 未完成事项与下一步；5) 重要错误与规避方式。用第三人称分条列出，保留关键标识符与数字；不要编造，不要评论，只输出摘要正文。'
-      : 'You compress conversations. Summarise the transcript into a structured summary with: 1) goals and constraints; 2) confirmed facts, decisions and conclusions; 3) current state of code/files/artifacts; 4) open items and next steps; 5) important errors and workarounds. Use third person bullets, keep identifiers and numbers; do not invent, do not comment; output only the summary body.'
-  const body: CreateMessageRequest = {
-    model: 'deepseek-flash',
-    system,
-    messages: [{ role: 'user', content: transcript }],
+      ? '以上是这个会话中较早的对话。请把它压缩成结构化摘要，固定包含：1) 目标与约束；2) 已确认的事实、决定与结论；3) 代码/文件/产物的当前状态；4) 未完成事项与下一步；5) 重要错误与规避方式。用第三人称分条列出，保留关键标识符与数字；不要编造，不要评论。只输出摘要正文，不要调用任何工具。'
+      : 'The messages above are the earlier part of this conversation. Compress them into a structured summary covering: 1) goals and constraints; 2) confirmed facts, decisions and conclusions; 3) current state of code/files/artifacts; 4) open items and next steps; 5) important errors and workarounds. Use third person bullets, keep identifiers and numbers; do not invent, do not comment. Output only the summary body and do not call any tool.'
+  if (!previousSummary) {
+    return base
+  }
+  return [
+    base,
+    '',
+    locale === 'zh-CN' ? '上一次的摘要（可合并，不要丢失信息）：' : 'Previous summary (merge it, do not lose information):',
+    previousSummary,
+  ].join('\n')
+}
+
+/** 摘要模型跟随最近的回答：只有同一路由才有前缀缓存可复用 */
+const summaryModel = (lastReply: AssistantMessage | undefined): string =>
+  lastReply?.model && lastReply.model.startsWith('deepseek')
+    ? lastReply.model
+    : FALLBACK_SUMMARY_MODEL
+
+/**
+ * 构造摘要请求：system、工具与消息都按对话请求的方式重放。
+ * withTools=false 用于模型误调工具、拿不到正文时的兜底重试。
+ */
+const buildSummaryRequest = (
+  session: Session,
+  target: Message[],
+  locale: Locale,
+  previousSummary: string | undefined,
+  withTools: boolean
+): CreateMessageRequest => {
+  const settings = useSettings.getState()
+  const lastReply = [...target].reverse().find(
+    (message): message is AssistantMessage => message.role === 'assistant'
+  )
+  const instruction: UserMessage = {
+    id: `compaction-${Date.now()}`,
+    role: 'user',
+    content: summaryInstruction(locale, previousSummary),
+    files: [],
+    createdAt: Date.now(),
+  }
+  const clientTools = parseClientTools(settings.toolsJson)
+  return {
+    model: summaryModel(lastReply),
+    system: composeSystemPrompt(
+      getActivePresetPrompt(session.id) ?? settings.customSystemPrompt
+    ),
+    messages: toRequestMessages(target, instruction, undefined, false),
     thinking: { type: 'disabled' },
     temperature: 0.3,
     max_tokens: SUMMARY_MAX_TOKENS,
-    tools: [],
+    tools: withTools
+      ? [...serverTools(lastReply?.search ?? false), ...toAnthropicTools(clientTools)]
+      : [],
     safety_check: { level: 'high' },
   }
+}
+
+const collectText = async (
+  apiKey: string,
+  body: CreateMessageRequest,
+  signal: AbortSignal
+): Promise<string> => {
   let text = ''
   for await (const event of streamMessage(apiKey, body, signal)) {
     if (event.type === 'content_block_start' && event.content_block.type === 'text') {
@@ -130,7 +160,7 @@ const summarize = async (
 
 /**
  * 压缩一个会话的较早轮次。返回新的压缩记录，调用方负责写回会话并提示。
- * 已压缩过的会话再次压缩时，会把上一次的摘要一并作为输入，避免丢信息。
+ * 已压缩过的会话再次压缩时，会把上一次的摘要放进尾部指令，避免丢信息。
  */
 export const compressSession = async (
   session: Session,
@@ -156,21 +186,25 @@ export const compressSession = async (
     return { ok: false, reason: 'tooShort' }
   }
   const target = visible.slice(0, cutoffIndex + 1)
-  const transcript = buildTranscript(target, locale)
-  if (transcript === '') {
+  if (!target.some((message) => message.role === 'assistant')) {
     return { ok: false, reason: 'tooShort' }
   }
   running.add(session.id)
   const controller = new AbortController()
   try {
-    const previous = session.compression
-    const header =
-      previous && locale === 'zh-CN'
-        ? `上一次的摘要：\n${previous.summary}\n\n新增对话：\n`
-        : previous
-          ? `Previous summary:\n${previous.summary}\n\nNew transcript:\n`
-          : ''
-    const summary = await summarize(apiKey, `${header}${transcript}`, locale, controller.signal)
+    // 第一次带工具，尽量与对话请求逐字一致；模型若误调工具、没有正文，再去掉工具重试
+    let summary = await collectText(
+      apiKey,
+      buildSummaryRequest(session, target, locale, session.compression?.summary, true),
+      controller.signal
+    )
+    if (summary === '') {
+      summary = await collectText(
+        apiKey,
+        buildSummaryRequest(session, target, locale, session.compression?.summary, false),
+        controller.signal
+      )
+    }
     if (summary === '') {
       return { ok: false, reason: 'error' }
     }
@@ -202,7 +236,7 @@ export const applyCompression = (
   return index < 0 ? history : history.slice(index + 1)
 }
 
-/** 追加到系统提示词末尾的摘要段落；没有压缩记录时为空串 */
+/** 追加到本轮提问末尾的摘要段落；没有压缩记录时为空串 */
 export const compressionSummarySection = (
   compression: SessionCompression | undefined,
   locale: Locale

@@ -7,6 +7,7 @@ import { settleReply } from '../reply.js'
 import {
   toSessionSummary,
   type AssistantMessage,
+  type Folder,
   type Session,
   type SessionSummary,
 } from '../types.js'
@@ -43,6 +44,8 @@ export type ChatState = {
   importingHistory: boolean
   /** 仅列表元数据，按 updatedAt 降序；流式消息更新不会改变此数组。 */
   sessions: SessionSummary[]
+  /** 侧栏文件夹；只影响列表归档，不参与请求 */
+  folders: Folder[]
   sessionCache: Record<string, Session>
   sessionLoadErrors: Record<string, boolean>
   sessionSaveErrors: Record<string, boolean>
@@ -50,6 +53,8 @@ export type ChatState = {
   activeId: string | null
   /** 正在生成回复的会话 */
   streaming: Record<string, AbortController>
+  /** 搜索结果跳转目标；消息列表滚动到位后清空 */
+  focusMessageId: string | null
 }
 
 export const useChatStore = create<ChatState>(() => ({
@@ -57,11 +62,13 @@ export const useChatStore = create<ChatState>(() => ({
   initError: false,
   importingHistory: false,
   sessions: [],
+  folders: [],
   sessionCache: {},
   sessionLoadErrors: {},
   sessionSaveErrors: {},
   activeId: null,
   streaming: {},
+  focusMessageId: null,
 }))
 
 export const { getState: get, setState: set } = useChatStore
@@ -232,7 +239,9 @@ export const bindChatPersistence = () => {
 }
 
 /** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
-export const createReply = (): AssistantMessage => {
+export const createReply = (
+  overrides?: Partial<Pick<AssistantMessage, 'thinking' | 'search' | 'model'>>
+): AssistantMessage => {
   const { thinking, search } = useSettings.getState()
   return {
     id: createId(),
@@ -245,6 +254,7 @@ export const createReply = (): AssistantMessage => {
     prefix: true,
     status: 'pending',
     blocks: [],
+    ...overrides,
   }
 }
 

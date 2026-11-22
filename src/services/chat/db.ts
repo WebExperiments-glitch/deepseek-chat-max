@@ -4,11 +4,12 @@ import {
   getJson,
   getJsonOptional,
   patchJson,
+  postFilesBatch,
   postJson,
   putBlob,
   putJson,
 } from '../api/localServer.js'
-import type { Session, SessionSummary } from './types.js'
+import type { Folder, Session, SessionSummary } from './types.js'
 
 /**
  * 会话与附件的本地存储。
@@ -52,6 +53,55 @@ export const setSessionPinned = async (id: string, pinned: boolean): Promise<voi
   await patchJson(`/api/sessions/${encodeURIComponent(id)}`, { pinned })
 }
 
+/** 会话归档：null 表示移出文件夹 */
+export const setSessionFolder = async (
+  id: string,
+  folderId: string | null
+): Promise<void> => {
+  await patchJson(`/api/sessions/${encodeURIComponent(id)}`, { folderId })
+}
+
+export const loadFolders = async (): Promise<Folder[]> => {
+  const { folders } = await getJson<{ folders: Folder[] }>('/api/folders')
+  return folders
+}
+
+export const createFolder = async (name: string): Promise<Folder> =>
+  postJson<Folder>('/api/folders', { name })
+
+export const renameFolder = async (id: string, name: string): Promise<void> => {
+  await patchJson(`/api/folders/${encodeURIComponent(id)}`, { name })
+}
+
+export const deleteFolder = async (id: string): Promise<void> => {
+  await deleteJson(`/api/folders/${encodeURIComponent(id)}`)
+}
+
+export type BatchPinResult = {
+  succeededIds: string[]
+  failedIds: string[]
+  limitReached: boolean
+}
+
+/** 批量删除：服务端逐个清理会话；返回实际删除的 id */
+export const batchDeleteSessions = async (ids: string[]): Promise<string[]> => {
+  const result = await postJson<{ deletedIds: string[] }>('/api/sessions/batch', {
+    action: 'delete',
+    ids,
+  })
+  return result.deletedIds
+}
+
+/** 批量置顶/取消置顶：达到上限时 limitReached 为 true */
+export const batchPinSessions = async (
+  ids: string[],
+  pinned: boolean
+): Promise<BatchPinResult> =>
+  postJson<BatchPinResult>('/api/sessions/batch', {
+    action: pinned ? 'pin' : 'unpin',
+    ids,
+  })
+
 /** 删除会话，服务端会清理已无会话引用的本地原件；远端文件不删。 */
 export const deleteSession = async (sessionId: string): Promise<void> => {
   await deleteJson(`/api/sessions/${encodeURIComponent(sessionId)}`)
@@ -71,8 +121,20 @@ export const addStagingSession = async (session: Session): Promise<void> => {
   await putJson(`/api/staging/sessions/${encodeURIComponent(session.id)}`, { session })
 }
 
+/** 批量暂存会话：一次 HTTP 请求写多条，显著降低大量会话时的往返开销。 */
+export const addStagingSessions = (sessions: Session[]): Promise<void> =>
+  postJson('/api/staging/sessions/batch', { sessions })
+
+/** 批量暂存原件：紧凑二进制帧，一次 HTTP 请求写多张图片。 */
 export const saveStagingFiles = (files: StoredFile[]): Promise<void> =>
-  uploadFiles(files, true)
+  postFilesBatch(
+    '/api/staging/files/batch',
+    files.map((file) => ({
+      id: file.id,
+      mimeType: file.blob.type || 'application/octet-stream',
+      blob: file.blob,
+    }))
+  )
 
 /** 图片位于会话 JSON 之后；全部读完后回填具体 MIME，保留归档给出的 isImage 标识。 */
 export const updateStagingFileTypes = async (types: ReadonlyMap<string, string>): Promise<void> => {

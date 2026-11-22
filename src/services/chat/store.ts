@@ -1,4 +1,5 @@
 import { createId } from '../../utils/id.js'
+import { LocalServerError } from '../api/localServer.js'
 import { ensureServerMigrated } from '../platform/migrateToServer.js'
 import { useUploads } from '../attachments.js'
 import { getCurrentModel, useSettings } from '../settings.js'
@@ -21,6 +22,7 @@ import {
 import {
   toSessionSummary,
   type AssistantMessage,
+  type Folder,
   type Session,
   type SessionSummary,
   type UserMessage,
@@ -73,9 +75,16 @@ export const initChat = (): Promise<void> => {
     try {
       // 先把浏览器旧数据迁到本机 SQLite；迁移失败不写标记，下次启动会重试
       await ensureServerMigrated()
-      const summaries = await db.loadSessionSummaries()
+      const [summaries, folders] = await Promise.all([
+        db.loadSessionSummaries(),
+        db.loadFolders().catch((error: unknown) => {
+          // 文件夹读取失败不影响会话列表，侧栏保持空文件夹
+          db.reportStorageError('read folders')(error)
+          return [] as Folder[]
+        }),
+      ])
       if (epoch === history.epoch) {
-        set({ ready: true, sessions: sortSessions(summaries) })
+        set({ ready: true, sessions: sortSessions(summaries), folders })
       }
     } catch (error) {
       if (epoch === history.epoch) {
@@ -232,6 +241,29 @@ export const selectSession = (id: string) => {
   }
 }
 
+/** 搜索结果跳转：标记目标消息后切换会话，消息列表滚动到位后清空标记 */
+export const focusSessionMessage = (sessionId: string, messageId: string) => {
+  set({ focusMessageId: messageId })
+  selectSession(sessionId)
+}
+
+export const clearFocusMessage = () => set({ focusMessageId: null })
+
+/** 批量置顶/取消置顶；失败项保持原状态 */
+export const setSessionsPinned = async (
+  ids: string[],
+  pinned: boolean
+): Promise<db.BatchPinResult> => {
+  const result = await db.batchPinSessions(ids, pinned)
+  const changed = new Set(result.succeededIds)
+  set((state) => ({
+    sessions: sortSessions(
+      state.sessions.map((session) => (changed.has(session.id) ? { ...session, pinned } : session))
+    ),
+  }))
+  return result
+}
+
 export const renameSession = (id: string, title: string) => {
   if (get().importingHistory || deletingSessions.has(id)) {
     return
@@ -255,18 +287,121 @@ export const renameSession = (id: string, title: string) => {
 
 /**
  * 置顶只改列表顺序，不修改会话正文，因此不需要 persist；
- * 失败时保留乐观结果并记录错误，下次刷新会回到数据库里的真实状态。
+ * 达到服务端上限时回滚乐观更新并返回 limit，由调用方提示。
  */
-export const setSessionPinned = (id: string, pinned: boolean) => {
+export const setSessionPinned = async (
+  id: string,
+  pinned: boolean
+): Promise<'ok' | 'limit' | 'error'> => {
   if (get().importingHistory || deletingSessions.has(id)) {
-    return
+    return 'error'
   }
   set((state) => ({
     sessions: sortSessions(
       state.sessions.map((session) => (session.id === id ? { ...session, pinned } : session))
     ),
   }))
-  void db.setSessionPinned(id, pinned).catch(db.reportStorageError('pin session'))
+  try {
+    await db.setSessionPinned(id, pinned)
+    return 'ok'
+  } catch (error) {
+    if (error instanceof LocalServerError && error.status === 409) {
+      set((state) => ({
+        sessions: sortSessions(
+          state.sessions.map((session) =>
+            session.id === id ? { ...session, pinned: !pinned } : session
+          )
+        ),
+      }))
+      return 'limit'
+    }
+    db.reportStorageError('pin session')(error)
+    return 'error'
+  }
+}
+
+/** 新建文件夹；失败返回 null，由调用方提示 */
+export const createFolder = async (name: string): Promise<Folder | null> => {
+  const trimmed = name.trim()
+  if (!trimmed || get().importingHistory) {
+    return null
+  }
+  try {
+    const folder = await db.createFolder(trimmed)
+    set((state) => ({ folders: [...state.folders, folder] }))
+    return folder
+  } catch (error) {
+    db.reportStorageError('create folder')(error)
+    return null
+  }
+}
+
+export const renameFolder = async (id: string, name: string): Promise<boolean> => {
+  const trimmed = name.trim()
+  if (!trimmed || get().importingHistory) {
+    return false
+  }
+  try {
+    await db.renameFolder(id, trimmed)
+    set((state) => ({
+      folders: state.folders.map((folder) =>
+        folder.id === id ? { ...folder, name: trimmed } : folder
+      ),
+    }))
+    return true
+  } catch (error) {
+    db.reportStorageError('rename folder')(error)
+    return false
+  }
+}
+
+/** 删除文件夹只清空归档关系，会话本身保留并回到未归档 */
+export const deleteFolder = async (id: string): Promise<boolean> => {
+  if (get().importingHistory) {
+    return false
+  }
+  try {
+    await db.deleteFolder(id)
+    set((state) => ({
+      folders: state.folders.filter((folder) => folder.id !== id),
+      sessions: state.sessions.map((session) =>
+        session.folderId === id ? { ...session, folderId: null } : session
+      ),
+    }))
+    return true
+  } catch (error) {
+    db.reportStorageError('delete folder')(error)
+    return false
+  }
+}
+
+/** 会话归档：先乐观更新列表，失败时回滚 */
+export const moveSessionToFolder = async (
+  sessionId: string,
+  folderId: string | null
+): Promise<boolean> => {
+  if (get().importingHistory || deletingSessions.has(sessionId)) {
+    return false
+  }
+  const previous =
+    get().sessions.find((session) => session.id === sessionId)?.folderId ?? null
+  set((state) => ({
+    sessions: state.sessions.map((session) =>
+      session.id === sessionId ? { ...session, folderId } : session
+    ),
+  }))
+  try {
+    await db.setSessionFolder(sessionId, folderId)
+    return true
+  } catch (error) {
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, folderId: previous } : session
+      ),
+    }))
+    db.reportStorageError('move session to folder')(error)
+    return false
+  }
 }
 
 /**
@@ -410,7 +545,11 @@ export const sendMessage = (targetSessionId: string | null) => {
 }
 
 /** 重新生成当前路径上的回答：在原问题下新增版本，不覆盖旧回答和后续对话。 */
-export const regenerateReply = (sessionId: string, messageId?: string) => {
+export const regenerateReply = (
+  sessionId: string,
+  messageId?: string,
+  options?: { search?: boolean }
+) => {
   if (get().importingHistory || deletingSessions.has(sessionId)) {
     return
   }
@@ -426,7 +565,7 @@ export const regenerateReply = (sessionId: string, messageId?: string) => {
     return
   }
   const history = path.slice(0, index - 1)
-  const reply = createReply()
+  const reply = createReply(options?.search === undefined ? undefined : { search: options.search })
   updateSession(sessionId, (s) => ({
     ...appendBranch(s, question.id, [reply]),
     updatedAt: Date.now(),

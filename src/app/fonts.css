@@ -7,6 +7,13 @@
   src: url('../assets/fonts/Inter-Regular.woff2') format('woff2');
 }
 
+/* 官方在中文环境用苹方渲染弯引号（仅这几个码位），其余字符仍走 Inter */
+@font-face {
+  font-family: 'quote-cjk-patch';
+  src: local('PingFangSC-Regular');
+  unicode-range: U+201C-201D, U+2018-2019;
+}
+
 @font-face {
   font-family: Inter;
   font-display: swap;

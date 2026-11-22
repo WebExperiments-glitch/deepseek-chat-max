@@ -1,0 +1,129 @@
+.page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background-color: var(--dsw-alias-bg-base);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: 60px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  color: var(--dsw-alias-brand-primary);
+}
+
+.logo {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+
+.main {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font: var(--dsw-font-xl-24);
+  color: var(--dsw-alias-label-primary);
+  word-break: break-word;
+}
+
+.notice {
+  margin-bottom: 24px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background-color: var(--dsw-alias-markdown-tag);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.userMessage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.userText {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background-color: var(--dsw-specific-bubble);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-markdown-base);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.image {
+  width: 120px;
+  height: 120px;
+  border-radius: 12px;
+  object-fit: cover;
+  background-color: var(--dsw-alias-markdown-tag);
+}
+
+.file {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background-color: var(--dsw-alias-markdown-tag);
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.assistantMessage {
+  color: var(--dsw-alias-label-primary);
+}
+
+.bottomNotice {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+
+.hint,
+.failed {
+  padding: 64px 24px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.failed {
+  color: var(--dsw-alias-state-error-primary);
+}

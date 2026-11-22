@@ -2,10 +2,12 @@ import clsx from 'clsx'
 import { useTranslate } from '../../i18n/index.js'
 import { getCurrentModel, useSettings } from '../../services/settings.js'
 import { useModels } from '../../services/models.js'
+import { useChatStore } from '../../services/chat/store.js'
 import {
   contextPercent,
   findContextWindow,
   formatTokens,
+  projectedContextTokens,
   resolveContextWindow,
   useContextUsage,
 } from '../../services/chat/usageStats.js'
@@ -37,7 +39,9 @@ export const ContextRing = ({
   const t = useTranslate()
   const model = useSettings((state) => state.models[state.provider]) ?? ''
   const usage = useContextUsage((state) => (sessionId ? state.byId[sessionId] : undefined))
-  const tokens = usage?.tokens ?? 0
+  const session = useChatStore((state) => (sessionId ? state.sessionCache[sessionId] : undefined))
+  // 锚点来自服务端 usage，压缩后的历史缩减即时叠加为增量
+  const tokens = projectedContextTokens(sessionId ?? '', session ?? null)
   // 用量记录里带着发请求时的模型：之后换模型或换服务商，也按当时的窗口解释这个数字
   const usedModel = usage?.model ?? (model || getCurrentModel())
   const listed = useModels((state) => findContextWindow(state.lists, usedModel))

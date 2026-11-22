@@ -39,8 +39,8 @@ export const createConfig = ({
   entry: './src/main.tsx',
   output: {
     path: path.resolve(root, 'dist'),
-    // 运行时按当前脚本地址推导资源路径，file:// 下异步 chunk、字体都按相对位置加载
-    publicPath: 'auto',
+    // 生产由本地服务从根路径托管，固定 '/'；开发交给 dev server 按脚本地址推导
+    publicPath: dev ? 'auto' : '/',
     filename: 'static/js/[name].[contenthash:8].js',
     chunkFilename: 'static/js/async/[name].[contenthash:8].js',
     cssFilename: 'static/css/[name].[contenthash:8].css',
@@ -78,6 +78,8 @@ export const createConfig = ({
         type: 'javascript/auto',
       },
       { test: /\.(woff2?|ttf)$/, type: 'asset/resource' },
+      // Rust 编译的 CRC32 WASM：作为 URL 资源发出，运行时 fetch + instantiate。
+      { test: /\.wasm$/, type: 'asset/resource' },
     ],
   },
   plugins: [
@@ -92,12 +94,17 @@ export const createConfig = ({
       __DEV_PROXY_PREFIX__: JSON.stringify(dev ? DEV_PROXY_PREFIX : ''),
     }),
     new rspack.CopyRspackPlugin({
-      patterns: [{ from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' }],
+      patterns: [
+        { from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' },
+        { from: path.resolve(root, 'NOTICE'), to: 'NOTICE', toType: 'file' },
+      ],
     }),
   ],
   performance: { hints: false },
   devServer: {
     port: 8090,
+    // /share/<id> 由前端路由处理，未命中的路径回退到 index.html
+    historyApiFallback: true,
     // 开发模式把服务商请求转发到真实地址，避免浏览器跨域限制。
     // 每条代理只匹配自己的前缀：opencode-go 与 opencode-zen 的路径不同，不能共用一条改写规则。
     // 路径原样保留：/provider/opencode-go/inference/go/openai/v1 → https://opencode.ai/...

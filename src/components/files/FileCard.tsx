@@ -22,7 +22,7 @@ export const FileCard = ({
 }: {
   name: string
   size: number
-  status?: 'uploading' | 'done' | 'error'
+  status?: 'uploading' | 'parsing' | 'done' | 'error'
   error?: string
   onRetry?: () => void
   onRemove?: () => void
@@ -35,6 +35,9 @@ export const FileCard = ({
   if (status === 'uploading') {
     icon = <span className={styles.spinner} />
     description = t('uploadFileStatusUploading')
+  } else if (status === 'parsing') {
+    icon = <span className={styles.spinner} />
+    description = t('fileParsing')
   } else if (status === 'error') {
     // 不可重试（过大、格式不支持）时保留文件图标并显示原因
     if (onRetry) {

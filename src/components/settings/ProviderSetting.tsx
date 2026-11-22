@@ -1,16 +1,30 @@
 import { useEffect, useState } from 'react'
 import { classifyApiError } from '../../services/api/errors.js'
-import { getProvider, PROVIDERS, PROVIDER_IDS, type ProviderId } from '../../services/api/providers.js'
+import {
+  getProvider,
+  parseCustomModels,
+  PROVIDERS,
+  PROVIDER_IDS,
+  useCustomProvider,
+  type ProviderId,
+} from '../../services/api/providers.js'
 import {
   setProvider,
   setProviderApiKey,
   setProviderModel,
   useSettings,
 } from '../../services/settings.js'
-import { loadModelsWithKey, refreshModels, useModels } from '../../services/models.js'
+import {
+  loadModelsWithKey,
+  refreshModels,
+  syncCustomModels,
+  useModels,
+} from '../../services/models.js'
+import { useModelMeta } from '../../services/modelMeta.js'
 import { useTranslate } from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Select } from '../base/Select.js'
+import { CustomProviderFields } from './CustomProviderFields.js'
 import styles from './Settings.module.css'
 
 /**
@@ -22,6 +36,7 @@ import styles from './Settings.module.css'
 export const ProviderSetting = () => {
   const t = useTranslate()
   const provider = useSettings((state) => state.provider)
+  const customName = useCustomProvider((state) => state.config.name)
   return (
     <div className={styles.cell}>
       <div className={styles.provider}>
@@ -30,7 +45,10 @@ export const ProviderSetting = () => {
           ariaLabel={t('settingsProvider')}
           className={styles.providerSelect}
           value={provider}
-          options={PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].name }))}
+          options={PROVIDER_IDS.map((id) => ({
+            value: id,
+            label: id === 'custom' ? customName.trim() || t('customProviderFallbackName') : PROVIDERS[id].name,
+          }))}
           onChange={setProvider}
         />
         <ProviderBody provider={provider} />
@@ -42,13 +60,22 @@ export const ProviderSetting = () => {
 /** 当前服务商的 Key 与模型；Key 保存后重新拉取模型清单 */
 const ProviderBody = ({ provider }: { provider: ProviderId }) => {
   const t = useTranslate()
+  const customConfig = useCustomProvider((state) => state.config)
   const apiKey = useSettings((state) => state.apiKeys[provider])
   const savedModel = useSettings((state) => state.models[provider])
   const models = useModels((state) => state.lists[provider])
   const loading = useModels((state) => state.loading[provider])
+  const meta = useModelMeta((state) => state.entries[savedModel ?? ''])
   const [value, setValue] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 自定义服务商的模型来自手动清单，配置变化后立即同步
+  useEffect(() => {
+    if (provider === 'custom') {
+      syncCustomModels()
+    }
+  }, [provider, customConfig.models])
 
   // 已有 Key 但还没拉过清单时补拉一次
   useEffect(() => {
@@ -72,8 +99,14 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
     setVerifying(true)
     setError(null)
     try {
-      // 保存前先拉一次模型清单校验 Key，避免存下一个不可用的 Key
-      await verifyKey(provider, key)
+      // 自定义服务商没有模型清单地址时无法在线校验，保存后由「连接测速」确认
+      const skipVerify =
+        provider === 'custom' && !customConfig.modelsURL.trim()
+      if (!skipVerify) {
+        await verifyKey(provider, key)
+      } else {
+        syncCustomModels()
+      }
       setProviderApiKey(provider, key)
       setValue('')
       await refreshModels(provider)
@@ -95,13 +128,17 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
   }
 
   const defaultModel = getProvider(provider).defaultModel
+  const manualModels = provider === 'custom' ? parseCustomModels(customConfig) : []
   const options =
-    models.length > 0
-      ? models.map((model) => ({ value: model.id, label: model.label }))
-      : [{ value: defaultModel, label: defaultModel }]
+    manualModels.length > 0
+      ? manualModels.map((model) => ({ value: model.id, label: model.label }))
+      : models.length > 0
+        ? models.map((model) => ({ value: model.id, label: model.label }))
+        : [{ value: defaultModel, label: defaultModel }]
 
   return (
     <>
+      {provider === 'custom' ? <CustomProviderFields /> : null}
       {apiKey ? (
         <div className={styles.apiKeySaved}>
           <span className={styles.apiKeyMask}>{'*'.repeat(apiKey.length)}</span>
@@ -148,6 +185,15 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
           onChange={(model) => setProviderModel(provider, model)}
         />
       </div>
+      {meta ? (
+        <div className={styles.description}>
+          {meta.providerName}
+          {meta.contextWindow
+            ? ` · ${Math.round((meta.contextWindow / 1000) * 10) / 10}K context`
+            : ''}
+          {meta.inputModalities?.includes('image') ? ' · vision' : ''}
+        </div>
+      ) : null}
       {provider !== 'deepseek' ? (
         <div className={styles.description}>{t('settingsProviderAttachmentHint')}</div>
       ) : null}

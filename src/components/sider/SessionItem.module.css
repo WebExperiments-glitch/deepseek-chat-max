@@ -16,15 +16,21 @@
     color: var(--dsw-alias-brand-primary-invert);
   }
 
+  &.selected {
+    background-color: var(--dsw-specific-sidebar-nav-item-active-accent);
+  }
+
   @media (hover: hover) {
     &:not(.active):hover {
       background-color: var(--dsw-specific-sidebar-nav-item-hover);
     }
 
     &:hover,
-    &.active {
+    &.active,
+    &:focus-within {
       .action {
-        display: flex;
+        opacity: 1;
+        pointer-events: auto;
       }
     }
   }
@@ -39,10 +45,34 @@
   line-height: 18px;
 }
 
+/* 操作入口始终占位，只切换透明度：菜单打开后鼠标移进菜单时，
+   触发按钮不能 display:none，否则浮层锚点矩形变成 0，会瞬移到视口左上角 */
 .action {
-  display: none;
+  display: flex;
   flex-shrink: 0;
   margin-left: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+/* 多选模式左侧勾选框 */
+.checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 4px;
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.checkboxChecked {
+  border-color: var(--dsw-alias-brand-primary);
+  background-color: var(--dsw-alias-brand-primary);
 }
 
 .renameInput {
@@ -61,7 +91,8 @@
 
 @media (hover: none) {
   .action {
-    display: flex;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

@@ -32,27 +32,82 @@
   font: var(--dsw-font-markdown-base);
 }
 
-.shimmer {
-  color: transparent;
-  background: linear-gradient(
-      90deg,
-      var(--dsw-alias-label-secondary) 0%,
-      var(--dsw-alias-label-secondary) 40%,
-      var(--dsw-alias-label-caption) 50%,
-      var(--dsw-alias-label-secondary) 60%,
-      var(--dsw-alias-label-secondary) 100%
-    )
-    0 0 / 300% 100%;
-  background-clip: text;
-  animation: shimmer 2s ease-out infinite;
+/* 思考过程复制：hover 标题时显形，点击不触发折叠 */
+.titleCopy {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
+.title:hover .titleCopy,
+.title:focus-within .titleCopy {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .titleCopy {
+    opacity: 1;
   }
-  to {
-    background-position: 0 0;
+}
+
+/* 官方折叠区：grid-template-rows 1fr ↔ 0fr；展开 0.2s ease-out，收起 0.2s ease-in */
+.expanderOpen {
+  display: grid;
+  grid-template-rows: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  animation:
+    expandRows 0.2s var(--ds-ease-out),
+    expandFade 0.2s var(--ds-ease-in-out);
+}
+
+.expanderCollapsed {
+  display: grid;
+  grid-template-rows: 0fr;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    grid-template-rows 0.2s var(--ds-ease-in),
+    opacity 0.2s var(--ds-ease-in);
+}
+
+.expanderInner {
+  min-height: 0;
+}
+
+@keyframes expandRows {
+  from {
+    grid-template-rows: 0fr;
+  }
+}
+
+@keyframes expandFade {
+  from {
+    opacity: 0;
   }
 }
 

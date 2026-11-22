@@ -140,39 +140,146 @@ export const priorityScore = (
   return Math.pow(r, 0.7) * importance * rel
 }
 
+/** 中文虚词组合，命中它们没有检索价值 */
+const STOP_BIGRAMS = new Set([
+  '我们',
+  '你们',
+  '他们',
+  '这个',
+  '那个',
+  '什么',
+  '怎么',
+  '可以',
+  '如何',
+  '一下',
+  '就是',
+  '还是',
+  '因为',
+  '所以',
+  '但是',
+  '如果',
+  '现在',
+  '已经',
+  '一个',
+  '没有',
+  '不是',
+  '自己',
+  '的话',
+  '了吗',
+  '的是',
+])
+
+const CJK = /[\u3400-\u9fff\uf900-\ufaff]/
+
+/** 去掉空白与标点，便于做中文包含判断 */
+const normalizeText = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[\s，。、；;:：!！?？"'“”‘’（）()[\]【】《》<>]/g, '')
+
+/** 中文二元组：中文没有空格，用 bigram 近似「同一话题」 */
+const cjkBigrams = (text: string): string[] => {
+  const chars = Array.from(text)
+  const result: string[] = []
+  for (let index = 0; index < chars.length - 1; index += 1) {
+    if (CJK.test(chars[index]) && CJK.test(chars[index + 1])) {
+      const pair = chars[index] + chars[index + 1]
+      if (!STOP_BIGRAMS.has(pair)) {
+        result.push(pair)
+      }
+    }
+  }
+  return result
+}
+
+/** 拉丁词：英文、型号、技术名词 */
+const latinTokens = (text: string): string[] =>
+  (text.toLowerCase().match(/[a-z0-9][a-z0-9_+\-.#]{1,}/g) ?? []).filter(
+    (token) => token.length >= 2
+  )
+
 /**
- * 相关度：关键词命中 + 正文片段命中的加权。
- * 不引入向量检索——本地跑不了嵌入模型，且记忆条目本身带有抽取时生成的关键词，
- * 关键词重叠对「同一话题被再次提起」这个场景已经足够。
+ * 相关度：关键词命中 + 中文 bigram 覆盖 + 拉丁词覆盖 + 引号实体加成。
+ *
+ * 不引入向量检索——本地跑不了嵌入模型。bigram 覆盖对中文「同一话题被再次提起」
+ * 已经比单字或整句包含稳健得多，也不会因为多一个字就完全失配。
  */
 export const relevance = (entry: MemoryEntry, query: string): number => {
-  const q = query.toLowerCase().trim()
+  const q = query.trim()
   if (!q) {
     return 0.5
   }
-  let hits = 0
-  let total = 0
+  const qLower = q.toLowerCase()
+  const entryText = entry.text.toLowerCase()
+  const entryNorm = normalizeText(entryText)
+
+  const queryBigrams = [...new Set(cjkBigrams(q))]
+  const queryLatin = [...new Set(latinTokens(q))]
+
+  let keywordHits = 0
+  let keywordTotal = 0
   for (const keyword of entry.keywords) {
     const k = keyword.toLowerCase().trim()
     if (!k) {
       continue
     }
-    total += 1
-    if (q.includes(k)) {
+    keywordTotal += 1
+    // 提问里出现关键词，或提问的 bigram/单词与关键词互相包含（「上海工作」命中「上海」）
+    const hit =
+      qLower.includes(k) ||
+      [...queryBigrams, ...queryLatin].some(
+        (token) => token.length >= 2 && (k.includes(token) || token.includes(k))
+      )
+    if (hit) {
       // 较长的关键词命中更有说服力
-      hits += Math.min(1, 0.5 + k.length / 12)
+      keywordHits += Math.min(1, 0.5 + k.length / 12)
     }
   }
-  // 正文直接命中时补一个基础分，覆盖关键词生成不全的情况
-  const bodyHit = entry.text.toLowerCase()
-  let bodyScore = 0
-  for (const token of q.split(/[\s,，。、；;:：!！?？]+/)) {
-    if (token.length >= 2 && bodyHit.includes(token)) {
-      bodyScore += 0.25
+  const keywordScore = keywordTotal === 0 ? 0 : keywordHits / keywordTotal
+
+  let bigramScore = 0
+  if (queryBigrams.length > 0) {
+    const hits = queryBigrams.filter((pair) => entryNorm.includes(pair)).length
+    bigramScore = hits / queryBigrams.length
+  }
+
+  let latinScore = 0
+  if (queryLatin.length > 0) {
+    const hits = queryLatin.filter((token) => entryText.includes(token)).length
+    latinScore = hits / queryLatin.length
+  }
+
+  // 引号里的实体（产品名、地名、人名）命中时额外加权
+  let entityBonus = 0
+  for (const match of q.matchAll(/[“"「『']([^”"」』']{2,20})[”"」』']/g)) {
+    if (entryText.includes(match[1].toLowerCase())) {
+      entityBonus = 0.15
+      break
     }
   }
-  const keywordScore = total === 0 ? 0 : hits / total
-  return Math.min(1, keywordScore * 0.75 + Math.min(1, bodyScore) * 0.45)
+
+  const bodyScore = Math.max(bigramScore, latinScore)
+  return Math.min(1, keywordScore * 0.5 + bodyScore * 0.55 + entityBonus)
+}
+
+/** 文本相似度（0-1）：bigram 与拉丁词的 Jaccard，用于合并重复记忆 */
+export const textSimilarity = (left: string, right: string): number => {
+  const features = (text: string) =>
+    new Set([...cjkBigrams(text), ...latinTokens(text), ...normalizeText(text).split('')].filter(
+      (item) => item.length > 0
+    ))
+  const a = features(left)
+  const b = features(right)
+  if (a.size === 0 || b.size === 0) {
+    return 0
+  }
+  let shared = 0
+  for (const item of a) {
+    if (b.has(item)) {
+      shared += 1
+    }
+  }
+  return shared / (a.size + b.size - shared)
 }
 
 /**

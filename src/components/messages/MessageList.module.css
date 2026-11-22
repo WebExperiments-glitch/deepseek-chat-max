@@ -35,3 +35,43 @@
   margin: 0 auto;
   padding-bottom: 24px;
 }
+
+/* 选中文字后的引用按钮：固定在选区下方 */
+.quoteButton {
+  position: fixed;
+  z-index: 900;
+  transform: translateX(-50%);
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 28px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* 全文搜索跳转后的短暂高亮 */
+.focusFlash {
+  border-radius: 12px;
+  animation: focus-flash 1.6s ease-out;
+}
+
+@keyframes focus-flash {
+  0%,
+  35% {
+    background-color: var(--dsw-alias-button-ghost-active-fill);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}

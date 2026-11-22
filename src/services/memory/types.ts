@@ -8,13 +8,15 @@
 
 /** 记忆类别；决定注入时的归类标签 */
 export type MemoryKind =
-  /** 客观事实：身份、背景、经历 */
-  | 'fact'
-  /** 稳定偏好：表达习惯、审美、做事方式 */
+  /** 长期目标：用户的核心追求、持续任务、以后想做的事 */
+  | 'goal'
+  /** 稳定偏好：表达习惯、语气、审美、做事方式 */
   | 'preference'
   /** 角色设定：扮演关系、性格约定、称呼 */
   | 'persona'
-  /** 事件：发生过的、后续可能被提及的事 */
+  /** 客观事实：身份、背景、经历（仅在长期有用时保留） */
+  | 'fact'
+  /** 事件：发生过且后续可能被提起的事 */
   | 'event'
   /** 摘要：由早期对话压缩而来，承载已移出上下文的长期内容 */
   | 'summary'
@@ -74,8 +76,9 @@ export type MemoryBudget = {
 }
 
 export const DEFAULT_MEMORY_BUDGET: MemoryBudget = {
-  maxEntries: 24,
-  tokenBudget: 3000,
+  maxEntries: 16,
+  // 记忆块会随提问一起冻结进历史，控制单轮体积，避免长会话被重复的记忆撑大
+  tokenBudget: 1800,
 }
 
 /** 一条记忆在某一时刻的可视化快照，供面板展示 */
@@ -94,3 +97,15 @@ export type ExtractedMemory = {
   importance: number
   difficulty: number
 }
+
+/**
+ * 抽取器的写操作，对齐 Mem0 的 ADD / UPDATE / DELETE 语义：
+ * - add：全新事实，直接入库；
+ * - update：补充或纠正已有的一条，保留 id、刷新强度；
+ * - delete：新信息明确推翻旧信息（换工作、搬家、关系变化），只允许删除非锁定、非手动的条目。
+ * 重复内容（NOOP）不产生操作。
+ */
+export type ExtractedOperation =
+  | { op: 'add'; entry: MemoryEntry }
+  | { op: 'update'; id: string; entry: MemoryEntry }
+  | { op: 'delete'; id: string }

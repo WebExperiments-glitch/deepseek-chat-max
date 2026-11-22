@@ -27,6 +27,8 @@ export type OpenAiStreamState = {
   refusal: string | null
   /** 已发出 message_stop */
   finished: boolean
+  /** 客户端函数调用：按 tool_calls.index 累积 id、名称与 JSON 参数 */
+  toolCalls: Map<number, { id: string; name: string; args: string }>
   /** 累计用量，OpenAI 在末尾或每个 chunk 的 usage 字段中给出 */
   usage: {
     input_tokens: number
@@ -50,6 +52,7 @@ export const createOpenAiStreamState = (model: string): OpenAiStreamState => ({
   title: null,
   refusal: null,
   finished: false,
+  toolCalls: new Map(),
   usage: {
     input_tokens: 0,
     output_tokens: 0,
@@ -128,7 +131,11 @@ const readUsage = (state: OpenAiStreamState, value: unknown) => {
     ? value.completion_tokens_details
     : null
   const thinking = completionDetails ? pickFrom(completionDetails, 'reasoning_tokens') : 0
-  const safety = pickFrom(value, 'safety_tokens')
+  // Chat Completions 口径把 safety_tokens 放在 completion_tokens_details 内；
+  // 顶层作为兼容兜底（部分 OpenAI 兼容网关会平铺到顶层）。
+  const safety =
+    (completionDetails ? pickFrom(completionDetails, 'safety_tokens') : 0) ||
+    pickFrom(value, 'safety_tokens')
   state.usage.thinking_tokens = Math.max(state.usage.thinking_tokens, thinking)
   state.usage.safety_tokens = Math.max(state.usage.safety_tokens, safety)
   const tools = isRecord(value.server_tool_use) ? value.server_tool_use : null
@@ -231,6 +238,27 @@ export function* readOpenAiEvent(
         delta: { type: 'text_delta', text },
       })
     }
+    // 函数调用：id 与名称通常只在首块出现，arguments 分多块拼接
+    if (Array.isArray(delta.tool_calls)) {
+      for (const item of delta.tool_calls) {
+        if (!isRecord(item)) {
+          continue
+        }
+        const index = typeof item.index === 'number' ? item.index : 0
+        const call = state.toolCalls.get(index) ?? { id: '', name: '', args: '' }
+        if (isString(item.id) && item.id) {
+          call.id = item.id
+        }
+        const fn = isRecord(item.function) ? item.function : null
+        if (fn && isString(fn.name) && fn.name) {
+          call.name = fn.name
+        }
+        if (fn && isString(fn.arguments)) {
+          call.args += fn.arguments
+        }
+        state.toolCalls.set(index, call)
+      }
+    }
   }
   // 会话标题只在最后一个 chunk 出现一次，跟随 delta 透传
   if (delta && isString(delta.title) && delta.title.trim() !== '') {
@@ -264,6 +292,29 @@ export function* finishOpenAiStream(
   const stopReason: StopReason = state.stopReason ?? (normal ? 'end_turn' : 'end_turn')
   for (const event of closeBlock(state)) {
     yield event
+  }
+  // 函数调用在流末尾补成完整内容块，交给上层按普通内容块保存与展示
+  for (const [key, call] of [...state.toolCalls].sort((a, b) => a[0] - b[0])) {
+    const index = state.nextIndex
+    state.nextIndex += 1
+    yield {
+      type: 'content_block_start',
+      index,
+      content_block: {
+        type: 'tool_use',
+        id: call.id || `call_${key}`,
+        name: call.name || 'unknown',
+        input: {},
+      },
+    }
+    if (call.args) {
+      yield {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'input_json_delta', partial_json: call.args },
+      }
+    }
+    yield { type: 'content_block_stop', index }
   }
   state.finished = true
   const { thinking_tokens, safety_tokens, tool_search, tool_fetch, tool_image_search, ...base } =

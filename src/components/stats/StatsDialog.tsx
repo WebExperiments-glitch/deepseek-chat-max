@@ -7,6 +7,7 @@ import {
   findContextWindow,
   formatCacheHitPercent,
   formatTokens,
+  projectedContextTokens,
   resolveContextWindow,
   useContextUsage,
 } from '../../services/chat/usageStats.js'
@@ -42,7 +43,7 @@ const StatsContent = ({ sessionId }: { sessionId: string }) => {
   const usedModel = context?.model ?? model
   const listed = useModels((state) => findContextWindow(state.lists, usedModel))
   const window = resolveContextWindow(usedModel, listed ?? undefined)
-  const contextTokens = context?.tokens ?? 0
+  const contextTokens = projectedContextTokens(sessionId, session ?? null)
   const percent = contextPercent(contextTokens, window)
   const cacheRate = formatCacheHitPercent(totals.cacheRead, totals.prompt, 1)
   const ratio = window && window > 0 ? Math.min(1, contextTokens / window) : 0
@@ -51,7 +52,11 @@ const StatsContent = ({ sessionId }: { sessionId: string }) => {
     { label: 'statsPrompt', value: formatTokens(totals.prompt) },
     { label: 'statsInputUncached', value: formatTokens(totals.inputUncached) },
     { label: 'statsCacheRead', value: formatTokens(totals.cacheRead) },
-    { label: 'statsCacheWrite', value: formatTokens(totals.cacheWrite) },
+    // DeepSeek 的 cache_creation 恒为 0（服务端自动硬盘缓存，不向客户端上报写入量），
+    // 只在真正上报了写入量的服务商下才显示这一行，避免永远显示一个无意义的 0。
+    ...(totals.cacheWrite > 0
+      ? [{ label: 'statsCacheWrite' as const, value: formatTokens(totals.cacheWrite) }]
+      : []),
     { label: 'statsOutput', value: formatTokens(totals.output) },
     // 思考与安全审核都包含在 output 里，只在服务端上报时才显示
     ...(totals.thinking > 0

@@ -1,0 +1,72 @@
+/* 右侧对话时间线：悬停显示问题摘要，当前轮次高亮 */
+.timeline {
+  position: fixed;
+  top: 50%;
+  right: 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-height: 60vh;
+  padding: 10px 6px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  transform: translateY(-50%);
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.dot {
+  position: relative;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--dsw-alias-border-l3);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
+
+  &:hover {
+    background-color: var(--dsw-alias-label-tertiary);
+    transform: scale(1.35);
+  }
+}
+
+.dotActive {
+  background-color: var(--dsw-alias-brand-primary);
+  transform: scale(1.25);
+}
+
+.dotLabel {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.12s ease;
+}
+
+.dot:hover .dotLabel,
+.dot:focus-visible .dotLabel {
+  opacity: 1;
+}

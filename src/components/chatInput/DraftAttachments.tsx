@@ -63,7 +63,9 @@ const AttachmentItem = ({
       title={error ?? item.file.name}
     >
       <img src={item.previewUrl} alt={item.file.name} />
-      {status === 'uploading' ? <div className={styles.uploading} /> : null}
+      {status === 'uploading' || status === 'parsing' ? (
+        <div className={styles.uploading} />
+      ) : null}
       {failed && retry ? (
         <Tooltip content={retryLabel}>
           <button type="button" className={styles.failed} aria-label={retryLabel} onClick={retry}>

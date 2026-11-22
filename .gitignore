@@ -10,3 +10,6 @@ build/
 !.env.example
 tmp/
 data/
+.trae/
+crates/**/target/
+*.tsbuildinfo

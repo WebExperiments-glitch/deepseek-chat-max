@@ -2,8 +2,10 @@ import { useTranslate } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo, useState } from 'react'
 import {
+  IconCloseOutline16,
   IconEditOutline16,
   IconRefreshOutline16,
+  IconSearchOutline16,
   IconWarningOutline16,
 } from '../base/icons.js'
 import { describeReply } from '../../services/chat/describe.js'
@@ -18,6 +20,7 @@ import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { IconButton } from '../base/IconButton.js'
+import { Menu } from '../base/Menu.js'
 import { Button } from '../base/Button.js'
 import { showToast } from '../base/toastState.js'
 import { useSettings } from '../../services/settings.js'
@@ -37,6 +40,22 @@ import {
 import styles from './AssistantMessage.module.css'
 
 const TOP_UP_URL = 'https://platform.deepseek.com/top_up'
+
+/** 工具参数优先用流式累积的 JSON 文本，格式化成可读缩进 */
+const formatToolInput = (call: { input: unknown; inputText?: string }) => {
+  if (call.inputText) {
+    try {
+      return JSON.stringify(JSON.parse(call.inputText), null, 2)
+    } catch {
+      return call.inputText
+    }
+  }
+  try {
+    return JSON.stringify(call.input, null, 2) ?? ''
+  } catch {
+    return String(call.input)
+  }
+}
 
 export const AssistantMessage = memo(function AssistantMessage({
   sessionId,
@@ -65,10 +84,13 @@ export const AssistantMessage = memo(function AssistantMessage({
   const answer = view.answer
   // 服务端会指出哪些图片被拦截（stop_details.explanation）；可在设置里关掉
   const showRefusalDetail = useSettings((state) => state.showRefusalDetail)
+  const provider = useSettings((state) => state.provider)
+  const assistantAvatar = useSettings((state) => state.assistantAvatar)
   const refusalReason = refused && showRefusalDetail ? (message.stopDetails?.explanation ?? '') : ''
   const responseText = [answer?.text, notice?.presentation === 'response' ? notice.text : null]
     .filter(Boolean)
     .join('\n\n')
+  const toolCalls = message.blocks.filter((block) => block.type === 'tool_use')
   const copyText = responseText || notice?.text
   const waiting = streaming && view.steps.length === 0 && !view.answer && !message.thinking
   const summaryEntry = `${message.id}-summary`
@@ -77,7 +99,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     !streaming && !refused && message.status !== 'error' && notice?.presentation !== 'response'
   if (editing) {
     return (
-      <div className={styles.message}>
+      <div className={styles.message} data-message-id={message.id}>
         <ReplyEditor
           hasThinking={message.blocks.some(
             (block) => block.type === 'thinking' && block.thinking.trim() !== ''
@@ -104,7 +126,8 @@ export const AssistantMessage = memo(function AssistantMessage({
     )
   }
   return (
-    <div className={styles.message}>
+    <div className={styles.message} data-message-id={message.id}>
+      {assistantAvatar ? <img className={styles.avatar} src={assistantAvatar} alt="" /> : null}
       {refused && !streaming ? (
         <div className={clsx(styles.notice, styles.refusalNotice)}>
           <IconWarningOutline16 />
@@ -129,6 +152,18 @@ export const AssistantMessage = memo(function AssistantMessage({
           disableLink={false}
           sources={view.sources}
         />
+      ) : null}
+      {toolCalls.length > 0 ? (
+        <div className={styles.toolCalls}>
+          {toolCalls.map((call) => (
+            <div key={call.id} className={styles.toolCall}>
+              <div className={styles.toolCallTitle}>
+                {t('toolsRequested')} · {call.name}
+              </div>
+              <pre className={styles.toolCallArgs}>{formatToolInput(call)}</pre>
+            </div>
+          ))}
+        </div>
       ) : null}
       {waiting ? (
         <div className={styles.waiting}>
@@ -209,16 +244,51 @@ export const AssistantMessage = memo(function AssistantMessage({
                 onClick={() => setEditing(true)}
               />
             ) : null}
-            <IconButton
-              icon={<IconRefreshOutline16 />}
-              tooltip={t('regenerate')}
-              tooltipPlacement="bottom"
-              disabled={busy || refused}
-              onClick={() => {
-                stopReadAloud()
-                regenerateReply(sessionId, message.id)
-              }}
-            />
+            <Menu
+              options={[
+                {
+                  key: 'regenerate',
+                  label: t('regenerate'),
+                  icon: <IconRefreshOutline16 />,
+                  onSelect: () => {
+                    stopReadAloud()
+                    regenerateReply(sessionId, message.id)
+                  },
+                },
+                ...(provider === 'deepseek'
+                  ? [
+                      {
+                        key: 'regenerate-search',
+                        label: t('regenerateWithSearch'),
+                        icon: <IconSearchOutline16 />,
+                        onSelect: () => {
+                          stopReadAloud()
+                          regenerateReply(sessionId, message.id, { search: true })
+                        },
+                      },
+                      {
+                        key: 'regenerate-no-search',
+                        label: t('regenerateWithoutSearch'),
+                        icon: <IconCloseOutline16 />,
+                        onSelect: () => {
+                          stopReadAloud()
+                          regenerateReply(sessionId, message.id, { search: false })
+                        },
+                      },
+                    ]
+                  : []),
+              ]}
+            >
+              {({ toggle }) => (
+                <IconButton
+                  icon={<IconRefreshOutline16 />}
+                  tooltip={t('regenerate')}
+                  tooltipPlacement="bottom"
+                  disabled={busy || refused}
+                  onClick={toggle}
+                />
+              )}
+            </Menu>
           </div>
           {isLast && canContinueReply(message) ? (
             <Button

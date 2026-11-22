@@ -51,6 +51,8 @@ API Key 和设置保存在浏览器 localStorage；会话、附件原件和长�
 | `pnpm start`      | 托管 `dist/` 与 API（8787）   |
 | `pnpm type`       | TypeScript 类型检查           |
 | `pnpm lint`       | oxlint 检查                   |
+| `pnpm test`       | Vitest 单元测试（纯逻辑与协议解析，无需 API Key） |
+| `pnpm test:watch` | 监听模式运行单元测试          |
 | `pnpm test:server`| 运行 SQLite 数据层测试        |
 | `pnpm format`     | oxfmt 格式化                  |
 

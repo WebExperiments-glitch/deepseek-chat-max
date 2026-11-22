@@ -6,6 +6,24 @@
   background-color: var(--dsw-alias-bg-base);
 }
 
+/* 官方侧栏收起：宽度 261px ↔ 0，0.3s ease-in-out；隐藏后延迟到动画结束再移出焦点 */
+.siderSlot {
+  flex-shrink: 0;
+  max-width: 261px;
+  overflow: hidden;
+  transition:
+    max-width 0.3s var(--ds-ease-in-out),
+    visibility 0s;
+}
+
+.siderSlotCollapsed {
+  max-width: 0;
+  visibility: hidden;
+  transition:
+    max-width 0.3s var(--ds-ease-in-out),
+    visibility 0s 0.3s;
+}
+
 .main {
   position: relative;
   display: flex;

@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { ModelOption } from '../api/client.js'
 import type { MessageUsage } from '../api/types.js'
+import { estimateTokens } from '../memory/tokenEstimate.js'
+import { getVisibleMessages } from './branches.js'
 import type { AssistantMessage, Session } from './types.js'
 import { readStorage, writeStorage } from '../platform/storage.js'
 
@@ -30,7 +32,14 @@ const CACHE_KEY = 'chat-demo:context-usage'
 /** 只保留最近 200 个会话，避免键无限增长 */
 const MAX_ENTRIES = 200
 
-export type ContextUsage = { tokens: number; at: number; model?: string }
+export type ContextUsage = {
+  /** 服务端上报的 prompt 体量，作为占用锚点 */
+  tokens: number
+  at: number
+  model?: string
+  /** 采样锚点时请求携带的文本估算，仅用于计算压缩后的即时变化 */
+  surfaceTokens?: number
+}
 
 type ContextState = { byId: Record<string, ContextUsage> }
 
@@ -48,10 +57,14 @@ const readCache = (): Record<string, ContextUsage> => {
     for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
       const entry = value as Partial<ContextUsage> | null
       if (typeof entry?.tokens === 'number' && typeof entry.at === 'number') {
-        result[id] =
-          typeof entry.model === 'string'
-            ? { tokens: entry.tokens, at: entry.at, model: entry.model }
-            : { tokens: entry.tokens, at: entry.at }
+        const restored: ContextUsage = { tokens: entry.tokens, at: entry.at }
+        if (typeof entry.model === 'string') {
+          restored.model = entry.model
+        }
+        if (typeof entry.surfaceTokens === 'number') {
+          restored.surfaceTokens = entry.surfaceTokens
+        }
+        result[id] = restored
       }
     }
     return result
@@ -87,7 +100,8 @@ export const promptTokensOf = (usage: MessageUsage): number =>
 export const noteContextUsage = (
   sessionId: string,
   usage: MessageUsage | undefined,
-  model?: string | null
+  model?: string | null,
+  surfaceTokens?: number
 ) => {
   if (!usage) {
     return
@@ -98,16 +112,71 @@ export const noteContextUsage = (
   }
   const previous = useContextUsage.getState().byId[sessionId]
   const usedModel = model ?? previous?.model
-  if (previous && previous.tokens === tokens && previous.model === usedModel) {
+  if (
+    previous &&
+    previous.tokens === tokens &&
+    previous.model === usedModel &&
+    previous.surfaceTokens === surfaceTokens
+  ) {
     return
   }
   const next: ContextUsage = { tokens, at: Date.now() }
   if (usedModel) {
     next.model = usedModel
   }
+  if (surfaceTokens !== undefined) {
+    next.surfaceTokens = surfaceTokens
+  }
   const byId = { ...useContextUsage.getState().byId, [sessionId]: next }
   useContextUsage.setState({ byId })
   writeCache(byId)
+}
+
+/**
+ * 当前请求实际携带的文本体积估算。用于相对锚点的增量计算，不参与计费展示。
+ * 与请求的构造保持一致：被摘要覆盖的轮次不进入请求，历史思考不回传。
+ */
+export const estimateRequestSurfaceTokens = (session: Session): number => {
+  const visible = getVisibleMessages(session)
+  const cutoff = session.compression
+    ? visible.findIndex((message) => message.id === session.compression?.upToMessageId)
+    : -1
+  const messages = cutoff >= 0 ? visible.slice(cutoff + 1) : visible
+  let total = 0
+  for (const message of messages) {
+    if (message.role === 'user') {
+      total += estimateTokens(message.content)
+      if (message.requestContext) {
+        total += estimateTokens(message.requestContext)
+      }
+    } else {
+      for (const block of message.blocks) {
+        if (block.type === 'text') {
+          total += estimateTokens(block.text)
+        }
+      }
+    }
+  }
+  return total
+}
+
+/**
+ * 即时占用：服务端锚点 + 相对采样时请求表面的变化。
+ *
+ * 压缩会跳过被摘要覆盖的轮次，本地历史仍在，所以锚点数字要等下一轮服务端
+ * usage 才下降。这里把压缩造成的历史缩减作为有符号增量叠加到锚点上，让圆环
+ * 立即回落；没有采样到请求表面时原样返回锚点，不自己猜一个数字。
+ */
+export const projectedContextTokens = (sessionId: string, session: Session | null): number => {
+  const entry = useContextUsage.getState().byId[sessionId]
+  if (!entry || !session) {
+    return 0
+  }
+  if (entry.surfaceTokens === undefined) {
+    return entry.tokens
+  }
+  const current = estimateRequestSurfaceTokens(session)
+  return Math.max(0, entry.tokens + current - entry.surfaceTokens)
 }
 
 /** 清掉会话的上下文记录（删除会话时调用） */
@@ -163,9 +232,9 @@ export type SessionUsageTotals = {
   prompt: number
   /** 缓存读取占 prompt 的比例；没有 prompt 时为 null */
   cacheRate: number | null
-  /** 服务端上报的搜索请求数 */
+  /** 服务端上报的搜索调用次数（web_search_requests，含尝试但失败的次数） */
   searchRequests: number
-  /** 客户端能看到的链接阅读次数 */
+  /** 服务端上报的抓取/浏览网页次数（web_fetch_requests，含深度思考搜索里打开的网页） */
   readRequests: number
 }
 
@@ -208,13 +277,12 @@ export const aggregateSessionUsage = (session: Session | null): SessionUsageTota
       totals.output += usage.output_tokens ?? 0
       totals.thinking += usage.output_tokens_details?.thinking_tokens ?? 0
       totals.safety += usage.output_tokens_details?.safety_tokens ?? 0
-      // 计费口径优先用 tool_search；没有时退回展示用的 web_search_requests
-      totals.searchRequests +=
-        usage.server_tool_use?.tool_search ?? usage.server_tool_use?.web_search_requests ?? 0
+      // 次数口径：搜索调用用 web_search_requests（实际发起了几次搜索），
+      // 抓取用 web_fetch_requests（浏览了几个网页，含深度思考搜索里打开的网页）。
+      // 不用 tool_search：它是计费的「查询词数」，一次搜索可含多个词，不等于搜索次数。
+      totals.searchRequests += usage.server_tool_use?.web_search_requests ?? 0
+      totals.readRequests += usage.server_tool_use?.web_fetch_requests ?? 0
     }
-    totals.readRequests += reply.blocks.filter(
-      (block) => block.type === 'server_tool_use' && block.name === 'deepseek_read_url'
-    ).length
   }
   totals.prompt = totals.inputUncached + totals.cacheRead + totals.cacheWrite
   totals.cacheRate = totals.prompt > 0 ? totals.cacheRead / totals.prompt : null
@@ -239,10 +307,45 @@ export const formatTokens = (value: number): string => {
 }
 
 /**
- * 缓存命中率。
+ * 在整数域用二分求「半数进位」后的百分比单位，避免浮点 toFixed 的舍入误差。
+ * scale 为 100（整数精度）或 1000（一位小数），返回 0..scale。
  *
- * 完全命中返回 100；部分命中时最多显示一位小数，若一位小数会四舍五入成 100，
- * 则退到两位小数，再退到 >99.9%，确保「10 个 token 里有 1 个没命中」不会被显示成 100%。
+ * 条件 `c <= ratio*scale + 0.5` 等价于 `(2c-1)*prompt <= 2*scale*cacheRead`；
+ * threshold 用 prompt 除以 2*scale 的商和余数精确计算向上取整，全程不碰浮点。
+ */
+const roundedPercentUnits = (cacheRead: number, prompt: number, decimalPlaces: 0 | 1): number => {
+  const scale = (decimalPlaces === 0 ? 1 : 10) * 100
+  const doubledScale = scale * 2
+  const quotient = Math.floor(prompt / doubledScale)
+  const remainder = prompt % doubledScale
+  let lower = 0
+  let upper = scale
+  while (lower < upper) {
+    const candidate = Math.floor((lower + upper + 1) / 2)
+    const factor = candidate * 2 - 1
+    const threshold = factor * quotient + Math.ceil((factor * remainder) / doubledScale)
+    if (cacheRead >= threshold) {
+      lower = candidate
+    } else {
+      upper = candidate - 1
+    }
+  }
+  return lower
+}
+
+const displayPercentUnits = (units: number, decimalPlaces: 0 | 1): string => {
+  if (decimalPlaces === 0) {
+    return String(units)
+  }
+  const whole = Math.floor(units / 10)
+  const tenths = units % 10
+  return tenths === 0 ? String(whole) : `${whole}.${tenths}`
+}
+
+/**
+ * 缓存命中率。完全命中返回 100；部分命中若按目标精度四舍五入会得到 100，
+ * 就按缺失量自适应增加小数位，显示足以区分的真实下界（如 99.99、99.9999），
+ * 保证「一万 token 里有一个没命中」永远不会被显示成 100%。两种精度走同一套规则。
  */
 export const formatCacheHitPercent = (
   cacheRead: number,
@@ -252,19 +355,36 @@ export const formatCacheHitPercent = (
   if (prompt <= 0) {
     return null
   }
+  // cacheRead 大于 prompt 属异常上报，按全命中处理；也避免缺失量变负导致补偿分支失控
   if (cacheRead >= prompt) {
     return '100'
   }
-  const oneDecimal = ((cacheRead / prompt) * 100).toFixed(1)
-  if (decimalPlaces === 0) {
-    const whole = Math.round((cacheRead / prompt) * 100)
-    return whole >= 100 ? oneDecimal : String(whole)
+  const missed = prompt - cacheRead
+  const rounded = roundedPercentUnits(cacheRead, prompt, decimalPlaces)
+  const fullHitUnits = decimalPlaces === 0 ? 100 : 1000
+  if (rounded < fullHitUnits) {
+    return displayPercentUnits(rounded, decimalPlaces)
   }
-  if (Number(oneDecimal) < 99.95) {
-    return oneDecimal
+  // 按缺失量算需要几位小数才能与 100 区分：每多一位，可分辨的缺口缩小十倍
+  let distinguishingPlaces = 1
+  let scaledDoubleGap = missed * 200
+  const denominatorTens = Math.floor(prompt / 10)
+  while (scaledDoubleGap <= denominatorTens) {
+    scaledDoubleGap *= 10
+    distinguishingPlaces += 1
   }
-  const twoDecimals = ((cacheRead / prompt) * 100).toFixed(2)
-  return twoDecimals === '100.00' ? '>99.99' : twoDecimals
+  // 补偿最后一位的舍入损失，保证显示值严格小于真实命中率
+  const denominatorOnes = prompt % 10
+  let roundedLoss = 5
+  for (let loss = 1; loss < 5; loss += 1) {
+    const factor = loss * 2 + 1
+    const threshold = factor * denominatorTens + Math.floor((factor * denominatorOnes) / 10)
+    if (scaledDoubleGap <= threshold) {
+      roundedLoss = loss
+      break
+    }
+  }
+  return `99.${'9'.repeat(distinguishingPlaces - 1)}${10 - roundedLoss}`
 }
 
 /** 按百分比取整数显示；窗口未知时返回 null */

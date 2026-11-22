@@ -216,6 +216,16 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+.sectionIntro {
+  margin: 2px 0 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background-color: var(--dsw-alias-bg-layer-2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .error {
   font-size: 12px;
   line-height: 18px;
@@ -346,14 +356,21 @@
     margin: 6px -4px;
     padding: 4px 0;
     overflow-x: auto;
+    scrollbar-width: none; /* 5 个分组时隐藏滚动条，保持顶部整齐 */
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 
   .navItem {
     flex: 1 0 auto;
     justify-content: center;
     width: auto;
-    min-width: 108px;
+    min-width: 80px;
     margin: 0;
+    padding: 9px 6px;
+    gap: 6px;
     white-space: nowrap;
 
     &:first-child {
@@ -421,6 +438,59 @@
   .cellButton svg {
     display: none;
   }
+}
+
+/* 分享链接管理 */
+.shareBlock {
+  margin-top: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.shareBlockTitle {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.shareEmpty {
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.shareList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shareRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background-color: var(--dsw-specific-sidebar-nav-item-hover);
+}
+
+.shareInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.shareTitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.shareMeta {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .mobileConfirm {

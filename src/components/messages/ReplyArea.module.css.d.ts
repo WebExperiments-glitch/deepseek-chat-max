@@ -4,6 +4,9 @@ declare const styles: {
   readonly "titleIcon": string;
   readonly "stoppedIcon": string;
   readonly "titleText": string;
+  readonly "expanderOpen": string;
+  readonly "expanderCollapsed": string;
+  readonly "expanderInner": string;
   readonly "shimmer": string;
   readonly "withLine": string;
   readonly "content": string;

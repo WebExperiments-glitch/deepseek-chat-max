@@ -38,6 +38,11 @@ export type UserMessage = MessageBranch & {
   content: string
   files: FileAttachment[]
   createdAt: number
+  /**
+   * 本轮发送时拼在提问前的动态上下文（压缩摘要 / 记忆 / 当前时间）。
+   * 必须随消息持久化：下一轮回放历史时要逐字一致，提示词前缀才能命中缓存。
+   */
+  requestContext?: string
 }
 
 /** 思考块：thinking_delta 累积，签名随 signature_delta 到达；历史轮次的思考服务端会丢弃，不回传 */
@@ -63,7 +68,16 @@ export type TextPart = {
 }
 
 /** 服务端工具调用与结果块按协议原样保存；历史请求只回传 read_link 调用与结果 */
-export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock
+export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock | ToolCallPart
+
+/** 客户端函数调用块：流式参数先累积在 inputText，展示时直接使用 */
+export type ToolCallPart = {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+  inputText?: string
+}
 
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；
@@ -115,7 +129,8 @@ export type Message = UserMessage | AssistantMessage
 
 /**
  * 长对话压缩记录：upToMessageId 是最后一条被摘要覆盖的消息（含它），
- * 之后请求会跳过这条及之前的轮次，并把 summary 追加到系统提示词里。
+ * 之后请求会跳过这条及之前的轮次，并把 summary 追加到本轮提问末尾
+ * （随 requestContext 冻结，系统提示词与历史前缀保持稳定以命中缓存）。
  * 本地完整历史不删除，切回较早分支时仍然可读。
  */
 export type SessionCompression = {
@@ -138,11 +153,21 @@ export type Session = {
   rootMessageId?: string | null
   /** 较早轮次的压缩摘要；没有压缩过时为 undefined */
   compression?: SessionCompression
+  /** 所属文件夹；只在列表元数据上使用，正文 JSON 不保存 */
+  folderId?: string | null
+}
+
+/** 会话文件夹：只用于侧栏归档与筛选，不进入请求 */
+export type Folder = {
+  id: string
+  name: string
+  createdAt: number
 }
 
 /** 会话列表元数据；消息只在打开会话时加载。pinned 只影响排序，不写进会话正文。 */
 export type SessionSummary = Pick<Session, 'id' | 'title' | 'createdAt' | 'updatedAt'> & {
   pinned?: boolean
+  folderId?: string | null
 }
 
 /** 显式提取字段，避免将完整会话的消息带进列表。 */
@@ -152,4 +177,5 @@ export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
   ...(session.pinned ? { pinned: true } : {}),
+  ...(session.folderId === undefined ? {} : { folderId: session.folderId }),
 })

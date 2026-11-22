@@ -1,4 +1,4 @@
-import { BRAND_LOCKUP_PATHS } from '../../services/brandArt.js'
+import { BRAND_LOCKUP_PATHS, WELCOME_WHALE_PATH } from '../../services/brandArt.js'
 
 /**
  * DeepSeek 品牌标识（鲸鱼 + deepseek 字标）。
@@ -19,5 +19,18 @@ export const BrandLogo = ({ className }: { className?: string }) => (
       // eslint-disable-next-line react/no-array-index-key
       <path key={index} d={d} />
     ))}
+  </svg>
+)
+
+/** 欢迎页问候语左侧的小鲸鱼；颜色取品牌色，与官方一致 */
+export const WhaleMark = ({ className }: { className?: string }) => (
+  <svg
+    className={className}
+    viewBox="0 0 35 26"
+    fill="none"
+    aria-hidden="true"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path fill="var(--dsw-alias-brand-primary)" d={WELCOME_WHALE_PATH} />
   </svg>
 )

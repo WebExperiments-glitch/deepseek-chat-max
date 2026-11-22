@@ -51,6 +51,8 @@ Settings → Data → Delete all chats clears all local conversations, original 
 | `pnpm start`     | Serve `dist/` and the API on 8787        |
 | `pnpm type`      | Run TypeScript type checks               |
 | `pnpm lint`      | Lint with oxlint                         |
+| `pnpm test`      | Run Vitest unit tests (no API key needed)|
+| `pnpm test:watch`| Run unit tests in watch mode             |
 | `pnpm test:server` | Run SQLite data-layer tests            |
 | `pnpm format`    | Format with oxfmt                        |
 

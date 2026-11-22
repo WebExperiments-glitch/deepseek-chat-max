@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import type { LinkedMessage, TranslationMessage } from '../i18n/index.js'
-import { uploadFile } from './api/client.js'
+import { retrieveFile, uploadFile } from './api/client.js'
 import { classifyApiError, getUploadErrorInfo, isRetryableApiError } from './api/errors.js'
-import type { FilePurpose } from './api/types.js'
+import type { FileObject, FilePurpose } from './api/types.js'
 import { ACCEPT_FILE_EXTS } from './uploadExts.js'
 
 /** 允许上传的扩展名，按扩展名白名单过滤，清单见 uploadExts.ts */
@@ -116,6 +116,45 @@ const next = () => {
   }
 }
 
+/** 服务端返回解析状态时的轮询间隔与上限（公开 Files API 不返回状态时直接跳过） */
+const PARSE_POLL_INTERVAL = 800
+const PARSE_TIMEOUT = 20_000
+
+type ParsedState = 'unknown' | 'pending' | 'done' | 'failed'
+
+const parsedState = (file: FileObject): ParsedState => {
+  const status = (file as FileObject & { status?: unknown }).status
+  if (typeof status !== 'string') {
+    return 'unknown'
+  }
+  if (['processed', 'completed', 'ready', 'succeeded', 'ok'].includes(status)) {
+    return 'done'
+  }
+  if (['failed', 'error', 'cancelled', 'deleted'].includes(status)) {
+    return 'failed'
+  }
+  return 'pending'
+}
+
+/** 等文件到达解析终态；20s 仍未完成时放行，避免阻塞发送 */
+const waitForParsing = async (apiKey: string, fileId: string, signal: AbortSignal) => {
+  const started = Date.now()
+  while (Date.now() - started < PARSE_TIMEOUT) {
+    if (signal.aborted) {
+      throw signal.reason
+    }
+    await new Promise((resolve) => setTimeout(resolve, PARSE_POLL_INTERVAL))
+    const file = await retrieveFile(apiKey, fileId, signal)
+    const state = parsedState(file)
+    if (state === 'done' || state === 'unknown') {
+      return
+    }
+    if (state === 'failed') {
+      throw new Error('file parsing failed')
+    }
+  }
+}
+
 /** 排队上传，最多同时上传 MAX_CONCURRENT 个；排队期间中止的任务不会发出请求 */
 const enqueueUpload = (
   apiKey: string,
@@ -132,7 +171,13 @@ const enqueueUpload = (
       }
       try {
         const body = file instanceof File ? file : new File([file], name, { type: file.type })
-        resolve((await uploadFile(apiKey, body, getUploadPurpose(name, isImage), signal)).id)
+        const uploaded = await uploadFile(
+          apiKey,
+          body,
+          getUploadPurpose(name, isImage),
+          signal
+        )
+        resolve(uploaded.id)
       } catch (error) {
         reject(error)
       }
@@ -147,6 +192,7 @@ const enqueueUpload = (
  */
 export type UploadTask =
   | { status: 'uploading' }
+  | { status: 'parsing' }
   | { status: 'done'; serverId: string }
   | { status: 'error'; error: TranslationMessage; retryable: boolean }
 
@@ -178,7 +224,15 @@ export const uploadAttachment = (
   const controller = new AbortController()
   setTask(id, { status: 'uploading' })
   const promise = enqueueUpload(apiKey, blob, name, isImage, controller.signal)
-    .then((serverId) => {
+    .then(async (serverId) => {
+      // 服务商返回解析状态时等待终态，期间显示「解析中」
+      if (!isImage) {
+        const file = await retrieveFile(apiKey, serverId, controller.signal)
+        if (parsedState(file) === 'pending') {
+          setTask(id, { status: 'parsing' })
+          await waitForParsing(apiKey, serverId, controller.signal)
+        }
+      }
       setTask(id, { status: 'done', serverId })
       return serverId
     })

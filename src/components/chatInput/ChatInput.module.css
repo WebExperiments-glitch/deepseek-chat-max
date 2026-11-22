@@ -243,6 +243,17 @@
   padding: 12px;
 }
 
+/* 输入统计：小字贴在输入框下方右侧，不挤占功能行 */
+.inputStats {
+  padding: 0 16px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: right;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .toggles {
   display: flex;
   flex: 1;

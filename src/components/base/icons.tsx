@@ -252,6 +252,17 @@ export const IconPlusOutline16 = () => (
   </svg>
 )
 
+export const IconFolderOutline16 = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+    <path
+      d="M1.8 3.6h4.1l1.3 1.5h7v7.3H1.8V3.6Z"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
 export const IconPaperclipOutline16 = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path
@@ -537,6 +548,14 @@ export const IconPlayMediaOutline16 = () => (
       d="M13.4306 2.67302C16.3689 5.61129 16.3688 10.3753 13.4306 13.3136L12.4404 12.3234C14.8319 9.93183 14.8319 6.0548 12.4404 3.66326L13.4306 2.67302Z"
       fill="currentColor"
     />
+  </svg>
+)
+
+/** 运行代码：圆圈中一个播放三角，与官网代码块的「运行」按钮一致 */
+export const IconRun16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M6.75 5.5L10.5 8L6.75 10.5V5.5Z" fill="currentColor" />
   </svg>
 )
 

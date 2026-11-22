@@ -2,6 +2,7 @@ import { useTranslate } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { useIsMobile } from '../../app/viewport.js'
+import { useSettings } from '../../services/settings.js'
 import { IconEditOutline16 } from '../base/icons.js'
 import { editMessage, retryUpload } from '../../services/chat/store.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
@@ -43,6 +44,7 @@ export const UserMessage = memo(function UserMessage({
   const [draft, setDraft] = useState(message.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isMobile = useIsMobile()
+  const userAvatar = useSettings((state) => state.userAvatar)
   const canSend = !busy && (draft.trim() !== '' || message.files.length > 0)
 
   useLayoutEffect(() => {
@@ -61,7 +63,15 @@ export const UserMessage = memo(function UserMessage({
   }
 
   return (
-    <div className={clsx(styles.container, isFirst && styles.isFirst)}>
+    <div
+      className={clsx(
+        styles.container,
+        isFirst && styles.isFirst,
+        userAvatar && styles.hasAvatar
+      )}
+      data-message-id={message.id}
+    >
+      {userAvatar ? <img className={styles.avatar} src={userAvatar} alt="" /> : null}
       {message.files.length > 0 ? (
         <div
           className={clsx(

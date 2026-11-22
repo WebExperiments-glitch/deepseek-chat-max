@@ -15,8 +15,15 @@
  *   因此开发模式统一走开发服务器代理（见 rspack.config.ts）；生产静态站点需要自建反向代理。
  */
 
-/** 界面上可选的服务商 */
-export type ProviderId = 'deepseek' | 'openrouter' | 'opencode-go' | 'opencode-zen' | 'opendesign'
+import { create } from 'zustand'
+import { readStorage, writeStorage } from '../platform/storage.js'
+import { PROVIDER_CATALOG } from './providerCatalog.generated.js'
+
+/**
+ * 界面上可选的服务商。类型放宽为 string：内置 6 个 + 从 models.dev(MIT) 生成的
+ * 品牌清单（83 家），另有 custom 走用户自定义配置。动态 id 无需改代码即可接入。
+ */
+export type ProviderId = string
 
 /** 对话协议：anthropic 为 Messages API，openai 为 chat/completions */
 export type WireProtocol = 'anthropic' | 'openai'
@@ -133,21 +140,140 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     'https://amr-link.open-design.ai/v1/models',
     'opendesign'
   ),
+  // 自定义服务商：实际配置由 useCustomProvider 提供，getProvider 会动态组装
+  custom: {
+    id: 'custom',
+    name: '自定义',
+    protocol: 'openai',
+    baseURL: '',
+    modelsURL: '',
+    defaultModel: '',
+  },
 }
 
-/** 设置里的展示顺序 */
+/**
+ * 从 models.dev 品牌清单注册供应商。与上面 6 个原生配置同名的跳过，
+ * 保留经过实测调优的地址（如 deepseek 的 anthropic 端点、OpenCode 的代理前缀）。
+ */
+for (const item of PROVIDER_CATALOG) {
+  if (Object.hasOwn(PROVIDERS, item.id)) {
+    continue
+  }
+  // 品牌清单里的供应商直连其真实地址（有 CORS 问题的少数可后续加代理规则）。
+  PROVIDERS[item.id] = {
+    id: item.id,
+    name: item.name,
+    protocol: item.protocol,
+    baseURL: item.baseURL,
+    modelsURL: item.modelsURL,
+    defaultModel: '',
+  }
+}
+
+/** 设置里的展示顺序：原生 6 个在前，其余按品牌清单顺序，custom 收尾 */
 export const PROVIDER_IDS: ProviderId[] = [
   'deepseek',
   'openrouter',
   'opencode-go',
   'opencode-zen',
   'opendesign',
+  ...PROVIDER_CATALOG.map((item) => item.id).filter((id) => !Object.hasOwn({
+    deepseek: 1, openrouter: 1, 'opencode-go': 1, 'opencode-zen': 1, opendesign: 1,
+  }, id)),
+  'custom',
 ]
 
 export const isProviderId = (value: unknown): value is ProviderId =>
   typeof value === 'string' && Object.hasOwn(PROVIDERS, value)
 
-export const getProvider = (id: ProviderId): Provider => PROVIDERS[id]
+/** 自定义服务商配置：endpoint、协议与手动模型清单 */
+export type CustomProviderConfig = {
+  name: string
+  baseURL: string
+  protocol: WireProtocol
+  /** 模型清单地址；留空表示不请求，直接使用手动模型列表 */
+  modelsURL: string
+  /** 一行一个模型，支持 `id|显示名` */
+  models: string
+  defaultModel: string
+}
+
+const CUSTOM_KEY = 'chat-demo:custom-provider'
+
+const defaultCustomProvider = (): CustomProviderConfig => ({
+  name: '自定义',
+  baseURL: '',
+  protocol: 'openai',
+  modelsURL: '',
+  models: '',
+  defaultModel: '',
+})
+
+const readCustomProvider = (): CustomProviderConfig => {
+  const raw = readStorage(CUSTOM_KEY)
+  if (!raw) {
+    return defaultCustomProvider()
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object') {
+      return defaultCustomProvider()
+    }
+    const record = parsed as Record<string, unknown>
+    return {
+      name: typeof record.name === 'string' ? record.name : '自定义',
+      baseURL: typeof record.baseURL === 'string' ? record.baseURL : '',
+      protocol: record.protocol === 'anthropic' ? 'anthropic' : 'openai',
+      modelsURL: typeof record.modelsURL === 'string' ? record.modelsURL : '',
+      models: typeof record.models === 'string' ? record.models : '',
+      defaultModel: typeof record.defaultModel === 'string' ? record.defaultModel : '',
+    }
+  } catch {
+    return defaultCustomProvider()
+  }
+}
+
+export const useCustomProvider = create<{ config: CustomProviderConfig }>(() => ({
+  config: readCustomProvider(),
+}))
+
+export const setCustomProviderConfig = (patch: Partial<CustomProviderConfig>) => {
+  const config = { ...useCustomProvider.getState().config, ...patch }
+  writeStorage(CUSTOM_KEY, JSON.stringify(config))
+  useCustomProvider.setState({ config })
+}
+
+/** 手动模型清单：一行一个，`id|显示名` 可选 */
+export const parseCustomModels = (config: CustomProviderConfig) =>
+  config.models.split('\n').flatMap((line) => {
+    const [rawId, rawLabel] = line.split('|')
+    const id = rawId?.trim() ?? ''
+    if (!id) {
+      return []
+    }
+    return [{ id, label: rawLabel?.trim() || id }]
+  })
+
+const normalizeBaseURL = (value: string) => value.trim().replace(/\/+$/, '')
+
+export const getProvider = (id: ProviderId): Provider => {
+  if (id !== 'custom') {
+    return PROVIDERS[id]
+  }
+  const config = useCustomProvider.getState().config
+  const baseURL = normalizeBaseURL(config.baseURL)
+  const modelsURL = normalizeBaseURL(config.modelsURL)
+  const fallbackModel = parseCustomModels(config)[0]?.id ?? ''
+  return {
+    id: 'custom',
+    name: config.name.trim() || '自定义',
+    protocol: config.protocol,
+    baseURL,
+    // 有清单地址才请求；否则由设置页直接使用手动模型
+    modelsURL: modelsURL || (baseURL ? `${baseURL}/models` : ''),
+    defaultModel: config.defaultModel.trim() || fallbackModel,
+  }
+}
 
 /** 联网搜索、附件、语音与朗读只对 DeepSeek 服务商开放，其他服务商只做对话 */
 export const supportsDeepseekFeatures = (id: ProviderId) => id === 'deepseek'

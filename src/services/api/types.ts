@@ -173,12 +173,19 @@ export type DeepseekReadUrlTool = {
   name: 'deepseek_read_url'
 }
 
+/** 客户端函数调用：按 Anthropic Messages 的入参形状声明 */
+export type FunctionTool = {
+  name: string
+  description?: string
+  input_schema: unknown
+}
+
 export type CreateMessageRequest = {
   model: ChatModel
   system: string
   messages: MessageParam[]
-  thinking: { type: 'enabled' | 'disabled' }
-  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
+  thinking?: { type: 'enabled' | 'disabled'; budget_tokens?: number }
+  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool | FunctionTool)[]
   /** 可选：high 开启内容安全审核；不传等于 default 审核（文档：low 或不传不开启额外审核） */
   safety_check?: { level: 'high' }
   /** 采样温度 0–2，不传表示使用服务端默认值 */

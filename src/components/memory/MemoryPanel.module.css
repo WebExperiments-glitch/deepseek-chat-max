@@ -47,6 +47,153 @@
   gap: 8px;
 }
 
+.kindSelect,
+.stateSelect {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:focus-visible {
+    border-color: var(--dsw-alias-brand-primary);
+    outline: none;
+  }
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+
+  > span:first-child {
+    color: var(--dsw-alias-label-primary);
+    font-weight: 500;
+  }
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+
+  &:focus-visible {
+    border-color: var(--dsw-alias-brand-primary);
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--dsw-alias-label-tertiary);
+  }
+}
+
+.kindChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip,
+.chipActive {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.chipActive {
+  border-color: var(--dsw-alias-brand-primary);
+  background-color: var(--dsw-alias-button-ghost-active-fill);
+  color: var(--dsw-alias-brand-text);
+}
+
+.actionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dangerAction {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-state-error-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background-color: var(--dsw-specific-sidebar-nav-item-hover);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.editRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.editText {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+
+  &:focus-visible {
+    border-color: var(--dsw-alias-brand-primary);
+    outline: none;
+  }
+}
+
 .input {
   flex: 1;
   min-width: 0;

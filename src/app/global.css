@@ -10,6 +10,14 @@
   }
 }
 
+/* 宽阅读模式：仅在桌面端加宽消息列，移动端保持原宽度 */
+@media (min-width: 1024px) {
+  :root[data-reading-width='wide'] {
+    --message-list-max-width: 1120px;
+    --message-list-padding-horizontal: 64px;
+  }
+}
+
 body {
   overflow: hidden;
   margin: 0;

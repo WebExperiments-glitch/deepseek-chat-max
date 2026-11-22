@@ -7,7 +7,12 @@ import {
   IconStopFill16,
   IconThinkOutline14,
 } from '../base/icons.js'
-import { getDeepseekApiKey, setSearch, setThinking, useSettings } from '../../services/settings.js'
+import {
+  getDeepseekApiKey,
+  setSearch,
+  setThinking,
+  useSettings,
+} from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { useModels } from '../../services/models.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
@@ -22,6 +27,7 @@ import {
   useDrafts,
 } from '../../services/chat/drafts.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
+import { addManualMemory } from '../../services/memory/store.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { IconButton } from '../base/IconButton.js'
 import { ensureApiKey, requireDeepseekKey } from '../settings/settingsDialogState.js'
@@ -37,6 +43,15 @@ import { openStatsDialog } from '../stats/statsDialogState.js'
 import { useTranslate } from '../../i18n/index.js'
 import { supportsDeepseekFeatures } from '../../services/api/providers.js'
 import styles from './ChatInput.module.css'
+
+/** 输入统计：字符、词（拉丁词 + 每个 CJK 字符）、中文数与行数 */
+const countText = (text: string) => {
+  const chars = Array.from(text).length
+  const lines = text === '' ? 0 : text.split('\n').length
+  const cjk = text.match(/[\u3400-\u9fff\uf900-\ufaff]/g)?.length ?? 0
+  const words = text.match(/[A-Za-z0-9_'-]+|[\u3400-\u9fff\uf900-\ufaff]/g)?.length ?? 0
+  return { chars, words, cjk, lines }
+}
 
 /** 输入框：自适应高度的文本框 + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
 export const ChatInput = memo(function ChatInput({ sessionId }: { sessionId: string | null }) {
@@ -62,6 +77,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const deepseekKey = useSettings((state) => state.apiKeys.deepseek)
   /** 联网搜索、附件、语音与朗读只对 DeepSeek 服务商开放 */
   const deepseekProvider = supportsDeepseekFeatures(providerId)
+  const sendShortcut = useSettings((state) => state.sendShortcut)
   const modelId = useSettings((state) => state.models[state.provider]) ?? ''
   const listed = useModels((state) => state.lists[providerId].find((option) => option.id === modelId))
   /** 模型清单声明了输入模态且明确不含 image 时，提前提示：服务端会把图片换成占位文本 */
@@ -178,6 +194,21 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     }
     // 文本与上传完成态由提交动作读取最新快照，不使用上一次渲染的草稿。
     const currentDraft = getDraft(sessionId)
+    // /remember 开头的输入改为写入长期记忆，不发送消息
+    const remember = /^\/(?:remember|记住)\s+([\s\S]+)$/i.exec(currentDraft.text.trim())
+    if (remember && currentDraft.attachments.length === 0) {
+      if (!useSettings.getState().memoryWriteEnabled) {
+        showToast({ key: 'memoryWriteDisabled' })
+        return
+      }
+      void addManualMemory(remember[1]).then((saved) => {
+        if (saved) {
+          setDraftText(sessionId, '')
+          showToast({ key: 'memoryRemembered' })
+        }
+      })
+      return
+    }
     if (modelRejectsImages && currentDraft.attachments.some((item) => item.isImage)) {
       showToast({ key: 'modelNoImageSupport' })
     }
@@ -221,9 +252,14 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             }
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              send()
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              const withMod = event.ctrlKey || event.metaKey
+              const shouldSend =
+                sendShortcut === 'enter' ? !event.shiftKey : withMod
+              if (shouldSend) {
+                event.preventDefault()
+                send()
+              }
             }
           }}
           onPaste={(event) => {
@@ -239,6 +275,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           {`${text}\n`}
         </div>
       </div>
+      {text ? (
+        <div className={styles.inputStats}>{t('inputStats', countText(text))}</div>
+      ) : null}
       <div className={styles.functionRow}>
         {/* 深度思考 / 智能搜索，tooltip 在按钮上方 */}
         <div ref={togglesRef} className={styles.toggles}>
@@ -261,7 +300,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
                 : responsesProtocol
                   ? 'chatInputSearchUnsupportedResponses'
                   : searchReady
-                    ? 'deactivatedSearchTooltip'
+                    ? 'searchTooltip'
                     : 'chatInputSearchNeedsDeepseekKey'
             )}
           >

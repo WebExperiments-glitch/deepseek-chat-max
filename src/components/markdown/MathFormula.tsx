@@ -1,5 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ensureKatex, type Katex } from '../../services/markdown/katex.js'
+import { useTranslate } from '../../i18n/index.js'
+import { copyText } from '../../utils/clipboard.js'
+import { IconCopyOutline16 } from '../base/icons.js'
+import { showToast } from '../base/toastState.js'
 
 /** renderToString 外层包裹的标签，组件自己渲染外层，这里切掉 */
 const KATEX_WRAPPER = {
@@ -13,6 +17,11 @@ type MathHtmlResult = {
 }
 
 const noop = () => {}
+
+/** 复制原始 LaTeX；成功与失败都走现有 toast */
+const copyFormula = async (value: string) => {
+  showToast({ key: (await copyText(value)) ? 'copied' : 'copyFailed' })
+}
 
 /** KaTeX 渲染公式；出错时保留上次成功的结果（流式中公式未写完），没有则展示原文 */
 const useMathHtml = (input: string, isInline: boolean): MathHtmlResult => {
@@ -47,21 +56,39 @@ const useMathHtml = (input: string, isInline: boolean): MathHtmlResult => {
 }
 
 export const MathBlock = memo(function MathBlock({ value }: { value: string }) {
+  const t = useTranslate()
   const { html, renderMode } = useMathHtml(value, false)
   if (renderMode === 'fallback') {
     return <p className="ds-markdown-paragraph">{html}</p>
   }
   return (
-    <span className="katex-display ds-markdown-math">
+    <span className="katex-display ds-markdown-math markdown-math-block">
       <span className="katex" dangerouslySetInnerHTML={{ __html: html }}></span>
+      <button
+        type="button"
+        className="markdown-math-copy"
+        aria-label={t('copyFormula')}
+        title={t('copyFormula')}
+        onClick={() => void copyFormula(value)}
+      >
+        <IconCopyOutline16 />
+      </button>
     </span>
   )
 })
 
 export const InlineMath = memo(function InlineMath({ value }: { value: string }) {
+  const t = useTranslate()
   const { html, renderMode } = useMathHtml(value, true)
   if (renderMode === 'fallback') {
     return html
   }
-  return <span className="katex" dangerouslySetInnerHTML={{ __html: html }}></span>
+  return (
+    <span
+      className="katex"
+      title={t('copyFormulaHint')}
+      onDoubleClick={() => void copyFormula(value)}
+      dangerouslySetInnerHTML={{ __html: html }}
+    ></span>
+  )
 })

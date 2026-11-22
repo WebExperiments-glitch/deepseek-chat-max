@@ -334,12 +334,19 @@
   border-top-right-radius: var(--dsl-code-block-border-radius);
 }
 
-.md-code-block > pre {
+.md-code-block pre {
   font: var(--dsl-code-block-content-font);
   padding: 16px;
   margin: 0 !important;
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
+
+/* 代码自动换行：默认横向滚动，开启后按容器宽度折行 */
+:root[data-code-wrap='true'] .md-code-block pre {
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
 }
 
 .markdown-table-wrapper {
@@ -421,4 +428,178 @@
   padding: 16px;
   color: var(--dsw-alias-label-secondary);
   font-size: 14px;
+}
+
+/* 公式复制：块级公式 hover 显示按钮，行内公式双击复制 */
+.markdown-math-block {
+  position: relative;
+}
+
+.markdown-math-copy {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:hover {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.markdown-math-block:hover .markdown-math-copy,
+.markdown-math-block:focus-within .markdown-math-copy {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .markdown-math-copy {
+    opacity: 1;
+  }
+}
+
+/* 表格复制：右上角悬浮按钮 */
+.markdown-table-wrapper {
+  position: relative;
+  max-height: 70vh;
+  overflow: auto;
+
+  &:hover .markdown-table-copy,
+  &:focus-within .markdown-table-copy {
+    opacity: 1;
+  }
+}
+
+/* 表头在长表格滚动时保持可见 */
+.ds-markdown .markdown-table-wrapper thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dsw-alias-bg-base);
+}
+
+.markdown-table-copy {
+  position: sticky;
+  top: 0;
+  left: 100%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: -26px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:hover {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+@media (hover: none) {
+  .markdown-table-copy {
+    opacity: 1;
+  }
+}
+
+/* GitHub 风格提示块 */
+.markdown-alert {
+  margin: 16px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--markdown-alert-color, var(--dsw-alias-brand-primary));
+  border-radius: 6px;
+  background-color: var(--markdown-alert-bg, var(--dsw-alias-bg-skeleton));
+  color: var(--dsw-alias-label-primary);
+
+  > *:first-child {
+    margin-top: 0;
+  }
+
+  > *:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.markdown-alert-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--markdown-alert-color, var(--dsw-alias-brand-text));
+}
+
+.markdown-alert-note {
+  --markdown-alert-color: #4d6bfe;
+  --markdown-alert-bg: rgba(77, 107, 254, 0.08);
+}
+
+.markdown-alert-tip {
+  --markdown-alert-color: #1a9e5c;
+  --markdown-alert-bg: rgba(26, 158, 92, 0.08);
+}
+
+.markdown-alert-important {
+  --markdown-alert-color: #8250df;
+  --markdown-alert-bg: rgba(130, 80, 223, 0.08);
+}
+
+.markdown-alert-warning {
+  --markdown-alert-color: #bf8700;
+  --markdown-alert-bg: rgba(191, 135, 0, 0.1);
+}
+
+.markdown-alert-caution {
+  --markdown-alert-color: #d1242f;
+  --markdown-alert-bg: rgba(209, 36, 47, 0.08);
+}
+
+/* diff 代码块：增删行着色 */
+.md-code-block pre .token.inserted {
+  color: #1a9e5c;
+  background-color: rgba(26, 158, 92, 0.12);
+}
+
+.md-code-block pre .token.deleted {
+  color: #d1242f;
+  background-color: rgba(209, 36, 47, 0.12);
+}
+
+/* meta 行高亮：```ts {1,4-6} */
+.md-code-block pre .md-code-line {
+  display: block;
+  min-height: 1.5em;
+}
+
+.md-code-block pre .md-code-line-active {
+  margin: 0 -16px;
+  padding: 0 16px;
+  background-color: rgba(77, 107, 254, 0.12);
 }

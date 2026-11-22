@@ -7,6 +7,7 @@ import type { FileAttachment } from '../../services/chat/types.js'
 import { IconPhotoErrorFill20, IconRefreshOutline16 } from '../base/icons.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { FileCard } from '../files/FileCard.js'
+import { ImageLightbox } from './ImageLightbox.js'
 import styles from './MessageFile.module.css'
 
 /** 原件从 IndexedDB 读出并生成本地地址；undefined 表示加载中，null 表示原件缺失。 */
@@ -38,7 +39,9 @@ const useUploadState = (file: FileAttachment) =>
       return null
     }
     const task = state.tasks[file.id]
-    return task?.status === 'uploading' || task?.status === 'error' ? task : null
+    return task?.status === 'uploading' || task?.status === 'parsing' || task?.status === 'error'
+      ? task
+      : null
   })
 
 /**
@@ -58,8 +61,10 @@ export const MessageFile = ({
   const t = useTranslate()
   const url = useFileUrl(file.id)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const upload = useUploadState(file)
   const uploading = upload?.status === 'uploading'
+  const parsing = upload?.status === 'parsing'
   const failed = upload?.status === 'error'
   const retryable = failed && upload.retryable
   const errorText = failed ? t(upload.error.key, upload.error.params) : undefined
@@ -78,7 +83,7 @@ export const MessageFile = ({
     ) : null
 
     // 上传中：本地原件已在 IndexedDB，先垫在蒙层下显示，避免只有一块灰色占位
-    if (uploading) {
+    if (uploading || parsing) {
       return (
         <div className={clsx(styles.image, styles.imageThumb)} title={file.name}>
           {preview}
@@ -134,17 +139,22 @@ export const MessageFile = ({
       )
     }
 
-    // 正常态：链接到原件
+    // 正常态：点击打开灯箱，可缩放与下载原图
     return url ? (
-      <a
-        className={clsx(styles.image, styles.imageThumb)}
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        title={file.name}
-      >
-        {preview}
-      </a>
+      <>
+        <button
+          type="button"
+          className={clsx(styles.image, styles.imageThumb)}
+          title={file.name}
+          aria-label={t('imagePreview')}
+          onClick={() => setPreviewOpen(true)}
+        >
+          {preview}
+        </button>
+        {previewOpen ? (
+          <ImageLightbox src={url} name={file.name} onClose={() => setPreviewOpen(false)} />
+        ) : null}
+      </>
     ) : (
       // 原件还没加载出来（极短暂）
       <div className={styles.image} />
@@ -155,7 +165,7 @@ export const MessageFile = ({
     <FileCard
       name={file.name}
       size={file.size}
-      status={uploading ? 'uploading' : failed ? 'error' : 'done'}
+      status={uploading ? 'uploading' : parsing ? 'parsing' : failed ? 'error' : 'done'}
       error={errorText}
       onRetry={retry ?? undefined}
       onOpen={url && !upload ? () => window.open(url, '_blank', 'noreferrer') : undefined}

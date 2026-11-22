@@ -2,6 +2,9 @@
   position: absolute;
   inset: 0;
   display: flex;
+  background: var(--chat-background, transparent);
+  background-size: cover;
+  background-position: center;
 }
 
 .welcome {
@@ -18,6 +21,7 @@
 
 .greeting {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   margin-bottom: 21px;
@@ -28,11 +32,23 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* 官方尺寸：34×25，右侧留 10px */
+.whale {
+  flex-shrink: 0;
+  width: 34px;
+  height: 25px;
+  margin-right: 10px;
+}
+
 @media (max-width: 439px) {
   .greeting {
     font-size: 20px;
     line-height: 28px;
     font-weight: 500;
+  }
+
+  .whale {
+    transform: scale(0.88);
   }
 }
 

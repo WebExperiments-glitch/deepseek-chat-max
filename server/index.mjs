@@ -1,28 +1,42 @@
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   clearMemories,
   clearStaging,
   commitStaging,
+  createFolder,
+  createShare,
   dbFile,
+  deleteFolder,
   deleteMemory,
   deleteSession,
+  deleteShare,
   getFile,
   getMeta,
   getSession,
+  getShare,
   importRecords,
   importSnapshot,
+  listFolders,
   listMemories,
+  listShares,
   listSessions,
   putFiles,
   putMemories,
   putSession,
+  putStagingFiles,
   putStagingSession,
+  putStagingSessions,
+  renameFolder,
   renameSession,
+  searchMessages,
+  setSessionFolder,
   setSessionPinned,
   stats,
   updateStagingFileTypes,
+  usageSummary,
 } from './db.mjs'
 
 /**
@@ -38,6 +52,8 @@ const ROOT = path.resolve(import.meta.dirname, '..')
 const DIST = path.join(ROOT, 'dist')
 const MAX_JSON = 20 * 1024 * 1024
 const MAX_BLOB = 80 * 1024 * 1024
+const MAX_SESSION_BATCH = 48 * 1024 * 1024
+const MAX_FILE_BATCH = 96 * 1024 * 1024
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -80,6 +96,40 @@ const readBody = async (req, limit) => {
     chunks.push(chunk)
   }
   return Buffer.concat(chunks)
+}
+
+/**
+ * 解析批量原件的紧凑二进制帧（与 localServer.ts 的 postFilesBatch 对应）：
+ * 每条记录 = 3 个小端 u32（id / mime / data 长度）+ 三段原始字节。
+ */
+const parseFileBatch = (buf) => {
+  const files = []
+  let offset = 0
+  while (offset < buf.length) {
+    if (offset + 12 > buf.length) {
+      throw Object.assign(new Error('malformed file batch'), { status: 400 })
+    }
+    const idLength = buf.readUInt32LE(offset)
+    const mimeLength = buf.readUInt32LE(offset + 4)
+    const dataLength = buf.readUInt32LE(offset + 8)
+    offset += 12
+    if (
+      idLength === 0 ||
+      idLength > 1024 ||
+      mimeLength > 256 ||
+      dataLength > MAX_BLOB ||
+      offset + idLength + mimeLength + dataLength > buf.length
+    ) {
+      throw Object.assign(new Error('malformed file batch'), { status: 400 })
+    }
+    const id = buf.toString('utf8', offset, offset + idLength)
+    offset += idLength
+    const mimeType = buf.toString('utf8', offset, offset + mimeLength)
+    offset += mimeLength
+    files.push({ id, mimeType, data: buf.subarray(offset, offset + dataLength) })
+    offset += dataLength
+  }
+  return files
 }
 
 const readJson = async (req) => {
@@ -143,12 +193,98 @@ const api = async (req, res, url) => {
     return sendJson(res, 200, stats())
   }
 
+  if (segments[1] === 'usage') {
+    if (method !== 'GET') {
+      return sendError(res, 405, 'method not allowed')
+    }
+    return sendJson(res, 200, usageSummary())
+  }
+
+  if (segments[1] === 'search') {
+    if (method !== 'GET') {
+      return sendError(res, 405, 'method not allowed')
+    }
+    const query = url.searchParams.get('q') ?? ''
+    const limit = Number(url.searchParams.get('limit') ?? 30)
+    return sendJson(res, 200, { results: searchMessages(query, limit) })
+  }
+
+  if (segments[1] === 'folders') {
+    if (segments.length === 2) {
+      if (method === 'GET') {
+        return sendJson(res, 200, { folders: listFolders() })
+      }
+      if (method === 'POST') {
+        const body = await readJson(req)
+        const name = typeof body.name === 'string' ? body.name.trim() : ''
+        if (!name) {
+          return sendError(res, 400, 'folder name is required')
+        }
+        return sendJson(
+          res,
+          200,
+          createFolder({
+            id: randomUUID().replace(/-/g, ''),
+            name,
+            createdAt: Date.now(),
+          })
+        )
+      }
+      return sendError(res, 405, 'method not allowed')
+    }
+    const id = idOf(segments[2])
+    if (method === 'PATCH') {
+      const body = await readJson(req)
+      const name = typeof body.name === 'string' ? body.name.trim() : ''
+      if (!name) {
+        return sendError(res, 400, 'folder name is required')
+      }
+      return renameFolder(id, name)
+        ? sendJson(res, 200, { ok: true })
+        : sendError(res, 404, 'folder not found')
+    }
+    if (method === 'DELETE') {
+      deleteFolder(id)
+      return sendJson(res, 200, { ok: true })
+    }
+    return sendError(res, 405, 'method not allowed')
+  }
+
   if (segments[1] === 'sessions') {
     if (segments.length === 2) {
       if (method === 'GET') {
         return sendJson(res, 200, { sessions: listSessions() })
       }
       return sendError(res, 405, 'method not allowed')
+    }
+    if (segments[2] === 'batch' && method === 'POST') {
+      const body = await readJson(req)
+      const ids = Array.isArray(body.ids) ? body.ids.filter((id) => typeof id === 'string') : []
+      const action = body.action
+      if (action === 'delete') {
+        for (const id of ids) {
+          deleteSession(id)
+        }
+        return sendJson(res, 200, { deletedIds: ids, failedIds: [], limitReached: false })
+      }
+      if (action === 'pin' || action === 'unpin') {
+        const succeededIds = []
+        const failedIds = []
+        let limitReached = false
+        for (const id of ids) {
+          const result = setSessionPinned(id, action === 'pin')
+          if (result === 'ok') {
+            succeededIds.push(id)
+          } else {
+            if (result === 'limit') {
+              limitReached = true
+            }
+            failedIds.push(id)
+          }
+        }
+        return sendJson(res, 200, { succeededIds, failedIds, limitReached })
+      }
+      return sendError(res, 400, 'unknown batch action')
     }
     const id = idOf(segments[2])
     if (method === 'GET') {
@@ -166,9 +302,33 @@ const api = async (req, res, url) => {
     if (method === 'PATCH') {
       const body = await readJson(req)
       if (typeof body.pinned === 'boolean') {
-        return setSessionPinned(id, body.pinned)
-          ? sendJson(res, 200, { ok: true })
-          : sendError(res, 404, 'session not found')
+        const result = setSessionPinned(id, body.pinned)
+        if (result === 'missing') {
+          return sendError(res, 404, 'session not found')
+        }
+        if (result === 'limit') {
+          return sendJson(res, 409, { error: 'pin limit reached', code: 'pin_limit' })
+        }
+        return sendJson(res, 200, { ok: true })
+      }
+      if (Object.hasOwn(body, 'folderId')) {
+        const folderId =
+          body.folderId === null
+            ? null
+            : typeof body.folderId === 'string' && body.folderId
+              ? body.folderId
+              : undefined
+        if (folderId === undefined) {
+          return sendError(res, 400, 'invalid folderId')
+        }
+        const result = setSessionFolder(id, folderId)
+        if (result === 'missing') {
+          return sendError(res, 404, 'session not found')
+        }
+        if (result === 'folder-missing') {
+          return sendError(res, 404, 'folder not found')
+        }
+        return sendJson(res, 200, { ok: true })
       }
       if (typeof body.title !== 'string') {
         return sendError(res, 400, 'title or pinned is required')
@@ -211,6 +371,20 @@ const api = async (req, res, url) => {
   if (segments[1] === 'staging') {
     if (segments[2] === 'clear' && method === 'POST') {
       clearStaging()
+      return sendJson(res, 200, { ok: true })
+    }
+    if (segments[2] === 'sessions' && segments[3] === 'batch' && method === 'POST') {
+      const bytes = await readBody(req, MAX_SESSION_BATCH)
+      const body = JSON.parse(bytes.toString('utf8'))
+      if (!Array.isArray(body.sessions)) {
+        return sendError(res, 400, 'sessions must be an array')
+      }
+      putStagingSessions(body.sessions)
+      return sendJson(res, 200, { ok: true })
+    }
+    if (segments[2] === 'files' && segments[3] === 'batch' && method === 'POST') {
+      const bytes = await readBody(req, MAX_FILE_BATCH)
+      putStagingFiles(parseFileBatch(bytes))
       return sendJson(res, 200, { ok: true })
     }
     if (segments[2] === 'sessions' && segments[3] && (method === 'PUT' || method === 'POST')) {
@@ -256,6 +430,71 @@ const api = async (req, res, url) => {
     }
     if (method === 'DELETE') {
       deleteMemory(idOf(segments[2]))
+      return sendJson(res, 200, { ok: true })
+    }
+    return sendError(res, 405, 'method not allowed')
+  }
+
+  if (segments[1] === 'shares') {
+    if (segments.length === 2) {
+      if (method === 'GET') {
+        return sendJson(res, 200, { shares: listShares() })
+      }
+      if (method === 'POST') {
+        const body = await readJson(req)
+        const session = typeof body.sessionId === 'string' ? getSession(body.sessionId) : null
+        if (!session) {
+          return sendError(res, 404, 'session not found')
+        }
+        const ids = Array.isArray(body.messageIds)
+          ? body.messageIds.filter((id) => typeof id === 'string')
+          : []
+        const wanted = new Set(ids)
+        const messages = (session.messages ?? []).flatMap((message) => {
+          if (wanted.size > 0 && !wanted.has(message.id)) {
+            return []
+          }
+          if (message.role === 'user') {
+            const content = typeof message.content === 'string' ? message.content : ''
+            const files = (message.files ?? []).map((file) => ({
+              id: file.id,
+              name: file.name,
+              size: file.size,
+              isImage: file.isImage === true,
+            }))
+            return content.trim() || files.length
+              ? [{ id: message.id, role: 'user', content, createdAt: message.createdAt, files }]
+              : []
+          }
+          const text = (message.blocks ?? [])
+            .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+            .map((block) => block.text)
+            .join('\n')
+          return text.trim()
+            ? [{ id: message.id, role: 'assistant', text, createdAt: message.createdAt }]
+            : []
+        })
+        if (messages.length === 0) {
+          return sendError(res, 400, 'no shareable messages')
+        }
+        const share = createShare({
+          id: randomUUID().replace(/-/g, ''),
+          sessionId: session.id,
+          title: session.title,
+          messages,
+          createdAt: Date.now(),
+        })
+        return sendJson(res, 200, share)
+      }
+      return sendError(res, 405, 'method not allowed')
+    }
+    const id = idOf(segments[2])
+    if (method === 'GET') {
+      const share = getShare(id)
+      return share ? sendJson(res, 200, share) : sendError(res, 404, 'share not found')
+    }
+    if (method === 'DELETE') {
+      deleteShare(id)
       return sendJson(res, 200, { ok: true })
     }
     return sendError(res, 405, 'method not allowed')

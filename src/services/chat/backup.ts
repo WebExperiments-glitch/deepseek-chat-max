@@ -46,8 +46,9 @@ export const exportHistory = (): Promise<{ name: string; blob: Blob }> =>
 export const importHistory = (file: File): Promise<number> =>
   enqueueBackup(async () => {
     const { checkArchiveFormat, importArchive } = await import('./history/importArchive.js')
-    await checkArchiveFormat(file)
-    return replaceHistory(() => importArchive(file))
+    // 复用首次解析出的中央目录，避免为 4190 个条目做两遍微读。
+    const directory = await checkArchiveFormat(file)
+    return replaceHistory(() => importArchive(file, directory))
   })
 
 /** 确认删除后调用：以空历史原子替换全部本地会话与附件，保留 API Key 和其他设置。 */

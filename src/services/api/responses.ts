@@ -42,6 +42,10 @@ export type ResponsesRequest = {
   reasoning?: { effort: 'low' | 'high' | 'max' }
   safety_check?: { level: 'high' }
   title?: { enabled: boolean }
+  /** JSON Output：Responses 协议用 text.format 声明 */
+  text?: { format: { type: 'json_object' } }
+  /** 客户端函数调用（Responses 为扁平 function 形状） */
+  tools?: unknown[]
   user?: string
 }
 

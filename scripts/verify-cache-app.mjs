@@ -3,6 +3,8 @@
  * 复现应用的真实请求形态，验证「动态上下文放尾部」之后缓存能命中。
  * 同时验证一个边界：短 prompt 不足以形成缓存单元，需要足够长的稳定前缀。
  */
+import { formatCacheHitPercent } from './lib/cache-hit.mjs'
+
 const ORIGIN = 'https://api.deepseek.com'
 const key = process.env.DEEPSEEK_API_KEY
 if (!key) { console.error('missing key'); process.exit(2) }
@@ -55,8 +57,8 @@ const second = await call([
 
 if (second) {
   const prompt = (second.input_tokens ?? 0) + (second.cache_read_input_tokens ?? 0)
-  const rate = prompt > 0 ? (((second.cache_read_input_tokens ?? 0) / prompt) * 100).toFixed(1) : '0'
+  const rate = formatCacheHitPercent(second.cache_read_input_tokens ?? 0, prompt) ?? '0'
   console.log(`turn-2 cache hit: ${rate}% (read ${second.cache_read_input_tokens ?? 0} / prompt ${prompt})`)
-  console.log(rate !== '0.0' ? 'PASS: 动态尾部没有破坏前缀缓存' : 'FAIL: 仍然没有命中')
+  console.log(rate !== '0' ? 'PASS: 动态尾部没有破坏前缀缓存' : 'FAIL: 仍然没有命中')
   console.log('first output tokens:', first?.output_tokens ?? '?')
 }

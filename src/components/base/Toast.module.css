@@ -44,7 +44,7 @@
 
 /* 整条提示不拦截点击，只有链接可点 */
 .link {
-  color: var(--dsw-static-blue-400);
+  color: var(--dsw-static-deepseek-400);
   text-decoration: none;
   pointer-events: auto;
 

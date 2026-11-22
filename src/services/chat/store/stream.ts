@@ -2,9 +2,15 @@ import { prepareImageFile } from '../../../utils/image.js'
 import { ApiError, streamMessage, streamOpenAiChat } from '../../api/client.js'
 import { DEEPSEEK_ORIGIN, getProvider, supportsDeepseekFeatures } from '../../api/providers.js'
 import { streamResponses, toResponsesInput } from '../../api/responses.js'
-import type { MessageParam, MessageStreamEvent } from '../../api/types.js'
+import { digestForQuestion, SEARCH_DIGEST_LABEL } from '../../api/webSearch.js'
+import type { MessageStreamEvent } from '../../api/types.js'
 import { replyPrefixText, toOpenAiMessages, type InlineAttachment } from '../../api/toOpenAi.js'
-import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../../api/errors.js'
+import {
+  extractFileIds,
+  getFileErrorCode,
+  isContextOverflowError,
+  isRetryableApiError,
+} from '../../api/errors.js'
 import {
   cancelUpload,
   describeUploadError,
@@ -19,6 +25,7 @@ import {
 } from '../../settings.js'
 import { describeSkippedNames, inlineAttachments, notifyInlineNotice } from '../inlineAttachments.js'
 import {
+  estimateRequestSurfaceTokens,
   findContextWindow,
   noteContextUsage,
   resolveContextWindow,
@@ -34,6 +41,7 @@ import {
   type CompressOutcome,
 } from '../compression.js'
 import { composeSystemPrompt } from '../systemPrompt.js'
+import { getActivePresetPrompt } from '../../presets.js'
 import { formatTimeContext } from '../timeContext.js'
 import { extractRoundMemory, memoryBlockForQuery } from '../../memory/store.js'
 import * as db from '../db.js'
@@ -71,6 +79,52 @@ import {
 } from './state.js'
 
 type Request = { history: Message[]; question: UserMessage; prefix?: AssistantMessage }
+
+/** 服务端确认上下文溢出后，自动压缩并重试的次数（与附件失效重传分开计数） */
+const CONTEXT_OVERFLOW_RETRY_LIMIT = 1
+
+/** 设置里的工具定义：OpenAI chat/completions 的 function 形状（compression 侧使用 clientTools 的同构实现） */
+type ClientTool = {
+  type: 'function'
+  function: { name: string; description?: string; parameters?: unknown }
+}
+
+const parseClientTools = (raw: string): ClientTool[] => {
+  const value = raw.trim()
+  if (!value) {
+    return []
+  }
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    return parsed.filter(
+      (item): item is ClientTool =>
+        typeof item === 'object' &&
+        item !== null &&
+        (item as ClientTool).type === 'function' &&
+        typeof (item as ClientTool).function?.name === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
+const toAnthropicTools = (tools: ClientTool[]) =>
+  tools.map((tool) => ({
+    name: tool.function.name,
+    ...(tool.function.description ? { description: tool.function.description } : {}),
+    input_schema: tool.function.parameters ?? { type: 'object', properties: {} },
+  }))
+
+const toResponsesTools = (tools: ClientTool[]) =>
+  tools.map((tool) => ({
+    type: 'function',
+    name: tool.function.name,
+    ...(tool.function.description ? { description: tool.function.description } : {}),
+    parameters: tool.function.parameters ?? { type: 'object', properties: {} },
+  }))
 
 /** 把补传得到的 serverId 写回会话里所有引用同一附件的消息（编辑、重新生成会共用附件） */
 const saveServerIds = (sessionId: string, serverIds: Map<string, string>) => {
@@ -317,25 +371,6 @@ const resolveInlineAttachments = async (
   return { groups, skipped }
 }
 
-/**
- * 把请求级上下文（摘要 / 记忆 / 当前时间）放到最后一条 user 消息之前。
- * 只影响本轮尾部 token，历史前缀保持不变，提示词缓存才能继续命中。
- */
-const prependToLastUser = (messages: MessageParam[], context: string) => {
-  if (context === '') {
-    return
-  }
-  const last = messages.at(-1)
-  if (!last || last.role !== 'user') {
-    return
-  }
-  if (typeof last.content === 'string') {
-    last.content = `${context}\n\n${last.content}`
-  } else {
-    last.content = [{ type: 'text', text: context }, ...last.content]
-  }
-}
-
 /** 无法内联的附件（PDF、Word 等）交给界面层提示，服务层不直接弹 toast */
 const showSkippedAttachments = (names: string[]) => notifyInlineNotice(describeSkippedNames(names))
 
@@ -431,6 +466,9 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
   set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
   let reply = initial
   let frame = 0
+  let overflowRetries = 0
+  // 请求发出时采样一次请求表面体积，作为占用锚点的基准；压缩后的即时回落由它计算
+  let surfaceTokens: number | undefined
   const flush = () => {
     cancelAnimationFrame(frame)
     frame = 0
@@ -464,14 +502,66 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
          * 因此这些动态内容统一放到本轮提问的末尾：只改变尾部 token，
          * 历史前缀完全一致，缓存才能持续命中。
          */
-        const system = composeSystemPrompt(now.customSystemPrompt)
+        const system = composeSystemPrompt(
+          getActivePresetPrompt(sessionId) ?? now.customSystemPrompt
+        )
+        /**
+         * 以下两类请求没有「声明服务端联网工具」的能力，改用独立 Search API 预检：
+         * - 非 DeepSeek 服务商：压根没有 deepseek_web_search 工具；
+         * - DeepSeek 的 Responses 协议：内部块模型不保真 web_search_call，宁可预检。
+         * 若用户开了搜索且有 DeepSeek Key，把摘编作为动态上下文注入本轮提问末尾。
+         * 与摘要 / 记忆 / 时间一样冻结进 requestContext，保证前缀稳定；失败就降级为无摘编。
+         */
+        let searchDigest = ''
+        const needsPresearch =
+          !supportsDeepseekFeatures(now.provider) ||
+          (now.provider === 'deepseek' && now.deepseekProtocol === 'responses')
+        if (initial.search && needsPresearch && getDeepseekApiKey()) {
+          try {
+            const digest = await digestForQuestion(
+              getDeepseekApiKey(),
+              prepared.question.content,
+              controller.signal
+            )
+            searchDigest = `${SEARCH_DIGEST_LABEL}\n${digest.text}`
+          } catch {
+            // 检索失败不阻断主请求，按无搜索结果继续
+          }
+        }
         const contextTail = [
+          searchDigest,
           compressionSummarySection(compression, locale),
-          now.memoryEnabled ? memoryBlockForQuery(prepared.question.content) : '',
+          now.memoryReadEnabled
+            ? memoryBlockForQuery(
+                prepared.question.content,
+                // 最近几轮用户消息一起作为检索上下文，避免「那它呢」这类追问丢失话题
+                prepared.history
+                  .filter((message) => message.role === 'user')
+                  .slice(-2)
+                  .map((message) => message.content)
+              )
+            : '',
           now.timeContext ? formatTimeContext(locale) : '',
         ]
           .filter((part) => part !== '')
           .join('\n\n')
+        /**
+         * 把本轮的动态上下文冻结到提问消息上。
+         * 下一轮回放历史时原样带上同一段文字，请求 N+1 才是请求 N 的严格超集；
+         * 否则上一轮的提问会「瘦回去」，前缀在末尾断裂，缓存只能命中更早的部分。
+         */
+        if ((prepared.question.requestContext ?? '') !== contextTail) {
+          prepared.question.requestContext = contextTail === '' ? undefined : contextTail
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === prepared.question.id && message.role === 'user'
+                ? { ...message, requestContext: prepared.question.requestContext }
+                : message
+            ),
+          }))
+          persist(sessionId)
+        }
         const messages = toRequestMessages(
           applyCompression(prepared.history, compression),
           prepared.question,
@@ -479,7 +569,9 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
           initial.thinking ?? false,
           latestReminder
         )
-        prependToLastUser(messages, contextTail)
+        // 在请求发出前采样：此时会话已包含本轮提问，压缩记录仍是上一轮的
+        const requestSession = getSession(sessionId)
+        surfaceTokens = requestSession ? estimateRequestSurfaceTokens(requestSession) : undefined
         const provider = getProvider(useSettings.getState().provider)
         const model = initial.model ?? getCurrentModel()
         // DeepSeek 可以在 Messages 与 Responses 两套协议之间切换；其余服务商固定各自协议
@@ -488,7 +580,9 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
           useSettings.getState().provider === 'deepseek' &&
           useSettings.getState().deepseekProtocol === 'responses'
         // 采样参数在请求时读取，改设置后立即对下一轮生效
-        const { temperature, topP, maxTokens, effort, userId } = useSettings.getState()
+        const { temperature, topP, maxTokens, effort, userId, jsonMode, toolsJson } =
+          useSettings.getState()
+        const clientTools = parseClientTools(toolsJson)
         // user_id 可选：用于 KVCache 隔离与内容安全隔离，空串时不传
         const identity = userId.trim() ? { user_id: userId.trim() } : null
         const sampling = {
@@ -496,9 +590,11 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
           top_p: topP,
           ...(maxTokens === null ? {} : { max_tokens: maxTokens }),
         }
-        // 推理强度按文档走 output_config.effort；只在开启思考时下发，开关仍由 thinking.type 决定
+        // 推理强度按文档走 output_config.effort；只在开启思考时下发。
+        // 搜索轮数由模型自己判断，思考开不开完全取决于用户的深度思考开关。
+        const thinkingForEffort = initial.thinking ?? false
         const effortConfig =
-          effort && (initial.thinking ?? false) ? { output_config: { effort } } : {}
+          effort && thinkingForEffort ? { output_config: { effort } } : {}
         // 非 DeepSeek 服务商走 OpenAI 兼容协议，只发送对话文本
         let events: AsyncGenerator<MessageStreamEvent>
         if (useResponses) {
@@ -517,6 +613,8 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
               ...(now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
               ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
               ...(userId.trim() ? { user: userId.trim() } : {}),
+              ...(jsonMode ? { text: { format: { type: 'json_object' as const } } } : {}),
+              ...(clientTools.length > 0 ? { tools: toResponsesTools(clientTools) } : {}),
             },
             controller.signal
           )
@@ -542,33 +640,51 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
               model,
               messages: openaiMessages,
               stream: true,
+              // 让 OpenAI 兼容网关在 SSE 末尾带上 usage；不加则第三方服务商拿不到 token 统计
+              stream_options: { include_usage: true },
               ...sampling,
               ...(identity ? { user_id: identity.user_id } : {}),
+              ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+              ...(clientTools.length > 0 ? { tools: clientTools } : {}),
             },
             controller.signal,
             // 同一个会话固定用同一个 session id，便于上游做路由与提示缓存
             sessionId
           )
         } else {
+          const deepseekAnthropic = provider.id === 'deepseek'
+          // 搜索/看网页的轮数交给模型自己判断；思考开关完全由用户决定，
+          // 不再因为搜索而强制开启。
+          const effectiveThinking = initial.thinking ?? false
           events = streamMessage(
             getCurrentApiKey() || getDeepseekApiKey(),
             {
               model,
               system,
               messages,
-              thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+              // 官方 Anthropic 的 thinking 需要预算；DeepSeek 只认识 enabled/disabled
+              ...(deepseekAnthropic
+                ? { thinking: { type: effectiveThinking ? 'enabled' : 'disabled' } }
+                : initial.thinking
+                  ? { thinking: { type: 'enabled', budget_tokens: 4096 } }
+                  : {}),
               ...sampling,
-              ...effortConfig,
+              ...(deepseekAnthropic ? effortConfig : {}),
               ...(identity ? { metadata: identity } : {}),
-              ...(now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
-              tools: serverTools(initial.search ?? false),
-              ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
+              ...(deepseekAnthropic && now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
+              tools: deepseekAnthropic
+                ? [...serverTools(initial.search ?? false), ...toAnthropicTools(clientTools)]
+                : toAnthropicTools(clientTools),
+              ...(deepseekAnthropic && titleRequests.has(controller)
+                ? { title: { enabled: true } }
+                : {}),
             },
-            controller.signal
+            controller.signal,
+            provider.baseURL
           )
         }
-        if (provider.protocol === 'openai') {
-          // OpenAI 兼容服务不返回标题，用本轮提问本地生成
+        if (provider.id !== 'deepseek') {
+          // 非 DeepSeek 协议不返回标题，用本轮提问本地生成
           applyLocalTitle(sessionId, controller, prepared.question.content)
         }
         const blockIndexes = new Map<number, number>()
@@ -622,6 +738,42 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
           }
           continue
         }
+        // 上下文溢出：自动压缩较早轮次后重发一次。压缩固定走 DeepSeek Key，
+        // 与对话服务商无关；没有 Key 或压缩失败时保留原始报错，不静默吞掉。
+        if (
+          overflowRetries < CONTEXT_OVERFLOW_RETRY_LIMIT &&
+          !receivedContent &&
+          isContextOverflowError(error)
+        ) {
+          overflowRetries += 1
+          const overflowSession = getSession(sessionId)
+          const apiKey = getDeepseekApiKey()
+          if (overflowSession && apiKey) {
+            const outcome = await compressSession(
+              overflowSession,
+              apiKey,
+              useSettings.getState().locale
+            )
+            if (outcome.ok && !controller.signal.aborted && getSession(sessionId)) {
+              updateSession(sessionId, (current) => ({
+                ...current,
+                compression: outcome.compression,
+              }))
+              persist(sessionId)
+              // 请求快照还是压缩前的历史，重发时跳过已被摘要覆盖的轮次
+              request = {
+                ...request,
+                history: applyCompression(request.history, outcome.compression),
+              }
+              await waitForRetry(overflowRetries - 1, controller.signal)
+              if (controller.signal.aborted) {
+                reply = settleReply(reply, 'stopped', Date.now())
+                break
+              }
+              continue
+            }
+          }
+        }
         if (error instanceof ApiError && error.kind === 'interrupted' && reply.stopReason) {
           // 已收到 message_delta 的结束原因，只是缺了结尾的 message_stop
           reply = settleReply(reply, 'done', Date.now())
@@ -646,8 +798,8 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
     streamFlushes.delete(sessionId)
     cancelAnimationFrame(frame)
     updateReply(sessionId, reply)
-    // 记下这一轮真正发出去的 prompt 体量，供输入框的上下文圆环显示
-    noteContextUsage(sessionId, reply.usage, reply.model)
+    // 记下这一轮真正发出去的 prompt 体量与当时的请求表面，供圆环即时显示压缩后的变化
+    noteContextUsage(sessionId, reply.usage, reply.model, surfaceTokens)
     // 正常结束的回答才值得抽取记忆；失败与被拒绝的轮次不进记忆层
     if (reply.status === 'done') {
       void extractRoundMemory(sessionId, request.question.content, getReplyAnswerText(reply), [
