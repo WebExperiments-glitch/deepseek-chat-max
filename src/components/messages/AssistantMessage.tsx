@@ -1,4 +1,4 @@
-import { useTranslate } from '../../i18n/index.js'
+import { useTranslate, type TranslationKey } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo, useState } from 'react'
 import {
@@ -8,11 +8,13 @@ import {
   IconSearchOutline16,
   IconWarningOutline16,
 } from '../base/icons.js'
-import { describeReply } from '../../services/chat/describe.js'
+import { describeReply, type NoticeAction } from '../../services/chat/describe.js'
 import { canContinueReply, getReplyThinking } from '../../services/chat/reply.js'
 import {
+  compressCurrentSession,
   continueReply,
   editReplyContent,
+  newChat,
   regenerateReply,
   revertReplyContent,
 } from '../../services/chat/store.js'
@@ -40,6 +42,7 @@ import {
 import styles from './AssistantMessage.module.css'
 
 const TOP_UP_URL = 'https://platform.deepseek.com/top_up'
+const FEEDBACK_URL = 'https://github.com/deepseek-ai/DeepSeek-V3/issues'
 
 /** 工具参数优先用流式累积的 JSON 文本，格式化成可读缩进 */
 const formatToolInput = (call: { input: unknown; inputText?: string }) => {
@@ -55,6 +58,73 @@ const formatToolInput = (call: { input: unknown; inputText?: string }) => {
   } catch {
     return String(call.input)
   }
+}
+
+/**
+ * 错误提示里的修复动作。文案与归因来自 describe.ts 的机器码投影，
+ * 这里只负责把语义动作接到具体的 handler；不认识的动作为空。
+ */
+function useNoticeActions(sessionId: string, messageId: string, notice: ReturnType<typeof describeReply>) {
+  const t = useTranslate()
+  if (!notice) {
+    return []
+  }
+  const actions = notice.actions ?? (notice.action ? [notice.action] : [])
+  const actionKeys: Record<NoticeAction, TranslationKey> = {
+    apiKey: 'changeApiKey',
+    topUp: 'topUp',
+    organize: 'actionOrganize',
+    switchModel: 'actionSwitchModel',
+    newDraft: 'actionNewDraft',
+    retry: 'actionRetry',
+    feedback: 'actionFeedback',
+    shrinkFile: 'actionShrinkFile',
+  }
+
+  return actions.map((action) => {
+    const text = t(actionKeys[action])
+    const cls = styles.noticeAction
+    switch (action) {
+      case 'apiKey':
+        return <button key={action} className={cls} type="button" onClick={() => openSettings('data')}>{text}</button>
+      case 'topUp':
+        return (
+          <a key={action} className={cls} href={TOP_UP_URL} target="_blank" rel="noreferrer">
+            {text}
+          </a>
+        )
+      case 'organize':
+        return (
+          <button key={action} className={cls} type="button" onClick={() => void compressCurrentSession(sessionId)}>
+            {text}
+          </button>
+        )
+      case 'switchModel':
+        return <button key={action} className={cls} type="button" onClick={() => openSettings('model')}>{text}</button>
+      case 'newDraft':
+        return <button key={action} className={cls} type="button" onClick={newChat}>{text}</button>
+      case 'retry':
+        return (
+          <button key={action} className={cls} type="button" onClick={() => regenerateReply(sessionId, messageId)}>
+            {text}
+          </button>
+        )
+      case 'feedback':
+        return (
+          <a key={action} className={cls} href={FEEDBACK_URL} target="_blank" rel="noreferrer">
+            {text}
+          </a>
+        )
+      case 'shrinkFile':
+        return (
+          <button key={action} className={cls} type="button" onClick={() => showToast({ key: 'shrinkFileHint' })}>
+            {text}
+          </button>
+        )
+      default:
+        return null
+    }
+  })
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
@@ -79,6 +149,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const view = useReplyView(message, streaming)
   const panelEntry = useSearchPanel((state) => state.entry)
   const notice = streaming ? null : describeReply(message)
+  const noticeActions = useNoticeActions(sessionId, message.id, notice)
   // 安全拒绝：保留已下发的思考与正文，另外加一条拒答提示（含服务端给的原因）
   const refused = message.stopReason === 'refusal'
   const answer = view.answer
@@ -185,31 +256,9 @@ export const AssistantMessage = memo(function AssistantMessage({
           <IconWarningOutline16 />
           <span>
             {notice.text}
-            {notice.action === 'apiKey' ? (
-              <>
-                {' '}
-                <button
-                  type="button"
-                  className={styles.noticeAction}
-                  onClick={() => openSettings('data')}
-                >
-                  {t('changeApiKey')}
-                </button>
-              </>
-            ) : null}
-            {notice.action === 'topUp' ? (
-              <>
-                {' '}
-                <a
-                  className={styles.noticeAction}
-                  href={TOP_UP_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {t('topUp')}
-                </a>
-              </>
-            ) : null}
+            {noticeActions.map((action, index) => (
+              <span key={action?.key ?? index}> {action}</span>
+            ))}
           </span>
         </div>
       ) : null}

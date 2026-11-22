@@ -12,6 +12,7 @@ import {
   isContextOverflowError,
   isRetryableApiError,
 } from '../../api/errors.js'
+import { isAutoRetryable, toProblem } from '../../api/problem.js'
 import {
   cancelUpload,
   describeUploadError,
@@ -86,6 +87,12 @@ type Request = { history: Message[]; question: UserMessage; prefix?: AssistantMe
 
 /** 服务端确认上下文溢出后，自动压缩并重试的次数（与附件失效重传分开计数） */
 const CONTEXT_OVERFLOW_RETRY_LIMIT = 1
+
+/**
+ * 「只是有点挤」（限流/繁忙/超时/连接抖动）的后台自动重试次数。
+ * 仅在尚未收到任何正文时退避重试，失败2次后才把安抚提示交给用户；账户/内容/参数类绝不重试。
+ */
+const AUTO_RETRY_LIMIT = 2
 
 /** 设置里的工具定义：OpenAI chat/completions 的 function 形状（compression 侧使用 clientTools 的同构实现） */
 type ClientTool = {
@@ -492,6 +499,7 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
   let reply = initial
   let frame = 0
   let overflowRetries = 0
+  let autoRetries = 0
   // 请求发出时采样一次请求表面体积，作为占用锚点的基准；压缩后的即时回落由它计算
   let surfaceTokens: number | undefined
   const flush = () => {
@@ -811,6 +819,21 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
               continue
             }
           }
+        }
+        // 「只是有点挤」：限流/繁忙/超时/连接抖动，未收到正文时后台指数退避重试，
+        // 失败到上限才把安抚提示交给用户。账户/内容/参数类由机器闸门拦下，绝不重试。
+        if (
+          autoRetries < AUTO_RETRY_LIMIT &&
+          !receivedContent &&
+          isAutoRetryable(toProblem(error))
+        ) {
+          autoRetries += 1
+          await waitForRetry(FILE_RETRY_LIMIT + autoRetries - 1, controller.signal)
+          if (controller.signal.aborted) {
+            reply = settleReply(reply, 'stopped', Date.now())
+            break
+          }
+          continue
         }
         if (error instanceof ApiError && error.kind === 'interrupted' && reply.stopReason) {
           // 已收到 message_delta 的结束原因，只是缺了结尾的 message_stop

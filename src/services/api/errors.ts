@@ -1,4 +1,5 @@
 import { ApiError } from './client.js'
+import { isContextOverflowMessage, toProblem } from './problem.js'
 
 /**
  * 接口失败的统一分类。各调用方按自己的场景给同一种情况配不同文案，
@@ -66,24 +67,14 @@ export const isRetryableApiError = (error: unknown): boolean => {
 }
 
 /**
- * 服务端确认请求超出上下文窗口。各家文案不同，按 400/422 + 关键词识别。
- * 识别成功后可压缩较早轮次再重试，而不是直接把错误抛给用户。
+ * 是否是可自愈的上下文溢出错误（压缩历史后可重试）。
+ * 闸门统一走机器层 toProblem，避免这里与 UI 投影各用一套正则而漂移。
  */
-const CONTEXT_OVERFLOW_PATTERNS: ReadonlyArray<RegExp> = [
-  /context[_ -]?length[_ -]?exceeded/i,
-  /(maximum|max)\s+context\s+(length|window)/i,
-  /exceeds?\s+(the\s+)?context\s+(length|window|limit)/i,
-  /context\s+window\s+exceeded/i,
-  /(input|request|prompt)\s+(is\s+)?too\s+long/i,
-]
+export const isContextOverflowError = (error: unknown): boolean =>
+  toProblem(error).code === 'context_overflow'
 
-/** 是否是可自愈的上下文溢出错误（压缩历史后可重试） */
-export const isContextOverflowError = (error: unknown): boolean => {
-  if (!(error instanceof ApiError) || (error.status !== 400 && error.status !== 422)) {
-    return false
-  }
-  return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(error.message))
-}
+/** 供别处复用「服务端原文是否超长」的判定（与机器层同一份正则） */
+export { isContextOverflowMessage }
 
 /** 服务端判定附件失效的情况：本地有原件时重新上传即可自愈 */
 export type FileErrorCode = 'fileIdMissing' | 'fileDataMissing' | 'invalidFileId'
