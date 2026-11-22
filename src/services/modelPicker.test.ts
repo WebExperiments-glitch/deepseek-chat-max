@@ -10,7 +10,8 @@ import {
 } from './modelPicker.js'
 
 const model = (over: Partial<CatalogModel> = {}): CatalogModel => ({
-  id: 'm',
+  id: 'p/m',
+  modelId: 'm',
   name: 'Model M',
   providerId: 'p',
   providerName: 'Provider P',

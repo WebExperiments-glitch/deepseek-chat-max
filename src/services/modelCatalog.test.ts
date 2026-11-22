@@ -45,7 +45,8 @@ describe('parseCatalog', () => {
     const models = parseCatalog(v2Sample)
     expect(models).toHaveLength(1)
     const m = models[0]
-    expect(m.id).toBe('m1')
+    expect(m.id).toBe('some-provider/m1')
+    expect(m.modelId).toBe('m1')
     expect(m.providerId).toBe('some-provider')
     expect(m.providerName).toBe('Some Provider')
     expect(m.contextWindow).toBe(262144)

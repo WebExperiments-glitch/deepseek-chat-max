@@ -7,6 +7,7 @@ import {
   IconEditOutline16,
   IconFollowsystemOutline16,
   IconLightOutline16,
+  IconSearchOutline16,
   IconSettingsOutline16,
   IconThinkOutline16,
   IconUploadOutline14,
@@ -61,6 +62,7 @@ import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
 import { ParamControl } from './ParamControls.js'
 import paramStyles from './ParamControls.module.css'
 import { ProviderSetting } from './ProviderSetting.js'
+import { ModelPicker } from './ModelPicker.js'
 import { AppearanceSetting } from './AppearanceSetting.js'
 import { createLatestReminder } from '../../services/chat/latestReminder.js'
 import { useModels } from '../../services/models.js'
@@ -98,6 +100,11 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
     value: 'chat',
     label: 'settingsChatSection',
     icon: <IconEditOutline16 />,
+  },
+  {
+    value: 'model',
+    label: 'settingsModelSection',
+    icon: <IconSearchOutline16 />,
   },
   {
     value: 'memory',
@@ -163,6 +170,8 @@ const SettingsContent = () => {
             </>
           ) : section === 'chat' ? (
             <ChatSettings />
+          ) : section === 'model' ? (
+            <ModelPicker />
           ) : section === 'memory' ? (
             <MemoryPanel />
           ) : section === 'advanced' ? (

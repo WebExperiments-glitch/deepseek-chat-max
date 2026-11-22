@@ -25,7 +25,10 @@ export type ModelApi = {
 }
 
 export type CatalogModel = {
+  /** 全局唯一键（providerId/原始id）；同一模型可能出现在多个 provider，避免 key 冲突 */
   id: string
+  /** 发给该 provider API 的原始模型 id */
+  modelId: string
   name: string
   providerId: string
   providerName: string
@@ -94,7 +97,8 @@ export const parseCatalog = (raw: unknown): CatalogModel[] => {
         const outputPrice = num(output.price)
 
         out.push({
-          id,
+          id: `${providerId}/${id}`,
+          modelId: id,
           name: typeof m.name === 'string' && m.name ? m.name : id,
           providerId,
           providerName,
