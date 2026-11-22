@@ -1,6 +1,6 @@
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
 import {
   clearMemories,
@@ -42,7 +42,10 @@ import {
 /**
  * 本地聊天服务：静态页面 + SQLite REST API。
  *
- * 只绑定 127.0.0.1，浏览器和数据库在同一台机器上，不需要鉴权。
+ * 默认只绑定 127.0.0.1，浏览器和数据库在同一台机器上，不需要鉴权。
+ * 一旦把 HOST 设成非回环地址（0.0.0.0 / 局域网 IP）对外暴露，必须同时设置
+ * AUTH_TOKEN，否则服务拒绝启动（fail-closed）——否则同网段任何人都能读全部
+ * 会话/记忆、转发带 Key 的 /provider 代理、写入任意文件。
  * 开发时 Rspack 把 /api 代理到这里；生产时这个进程同时托管 dist。
  */
 
@@ -54,6 +57,36 @@ const MAX_JSON = 20 * 1024 * 1024
 const MAX_BLOB = 80 * 1024 * 1024
 const MAX_SESSION_BATCH = 48 * 1024 * 1024
 const MAX_FILE_BATCH = 96 * 1024 * 1024
+
+/** 真正的回环地址才免鉴权；0.0.0.0 绑定所有网卡，属于对外暴露 */
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1'])
+const isLoopback = (host) => LOOPBACK.has(host) || host === '::ffff:127.0.0.1'
+const EXPOSED = !isLoopback(HOST)
+const AUTH_TOKEN = (process.env.AUTH_TOKEN ?? '').trim()
+
+// 安全响应头。CSP 只放行本源脚本/样式，阻断外带 Key 的注入；nosniff 防止
+// 上传的 text/html 被当 HTML 执行（同源 XSS）。
+const SECURITY_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  'content-security-policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http:; " +
+    "frame-src 'self' blob:; object-src 'none'; base-uri 'self'; " +
+    "form-action 'self'; frame-ancestors 'none'",
+}
+
+if (EXPOSED && !AUTH_TOKEN) {
+  console.error(
+    `[server] 拒绝启动：HOST=${HOST} 是对外地址，必须设置 AUTH_TOKEN 才能启动。` +
+      `回环使用（默认 127.0.0.1）无需鉴权。`
+  )
+  process.exit(1)
+}
+if (EXPOSED) {
+  console.warn('[server] 已对外暴露并启用 Bearer Token 鉴权。')
+}
 
 /**
  * 通用服务商代理：浏览器直连多数模型网关会被 CORS 拦（鉴权失败响应尤其没有 CORS 头）。
@@ -168,11 +201,17 @@ const sendJson = (res, status, body) => {
     'content-type': 'application/json; charset=utf-8',
     'content-length': bytes.length,
     'cache-control': 'no-store',
+    ...SECURITY_HEADERS,
   })
   res.end(bytes)
 }
 
-const sendError = (res, status, message) => sendJson(res, status, { error: message })
+/** 对外暴露时不回传内部错误详情（可能含端点/密钥片段）；回环时保留便于排障 */
+const publicErrorMessage = (message) =>
+  EXPOSED ? '请求失败，请稍后重试' : message
+
+const sendError = (res, status, message) =>
+  sendJson(res, status, { error: publicErrorMessage(message) })
 
 const readBody = async (req, limit) => {
   const chunks = []
@@ -266,6 +305,7 @@ const serveStatic = (req, res, pathname) => {
   res.writeHead(200, {
     'content-type': MIME[ext] ?? 'application/octet-stream',
     'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    ...SECURITY_HEADERS,
   })
   createReadStream(file).pipe(res)
 }
@@ -441,10 +481,18 @@ const api = async (req, res, url) => {
         return sendError(res, 404, 'file not found')
       }
       const bytes = Buffer.from(file.data)
+      // 附件按附件下载，且 nosniff：即便上传了 text/html 也不会在浏览器同源上下文里执行。
+      const mime = String(file.mimeType || 'application/octet-stream').toLowerCase()
+      const disposition = (req.headers['x-disposition'] === 'inline' && /^image\//.test(mime))
+        ? 'inline'
+        : 'attachment'
       res.writeHead(200, {
-        'content-type': file.mimeType || 'application/octet-stream',
+        'content-type': mime,
         'content-length': bytes.length,
         'cache-control': 'private, max-age=31536000, immutable',
+        'content-disposition': `${disposition}; filename="file"`,
+        ...SECURITY_HEADERS,
+        'content-security-policy': "default-src 'none'; sandbox",
       })
       return res.end(bytes)
     }
@@ -611,9 +659,30 @@ const api = async (req, res, url) => {
   return sendError(res, 404, 'not found')
 }
 
+/** 恒定时间比较 token，避免通过响应时序猜解 */
+const tokenMatches = (provided, expected) => {
+  const a = Buffer.from(String(provided))
+  const b = Buffer.from(String(expected))
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+/** 对外暴露时要求 Bearer Token；回环直连不受影响 */
+const authorize = (req) => {
+  if (!EXPOSED) {
+    return true
+  }
+  const header = String(req.headers.authorization ?? '')
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  return tokenMatches(token, AUTH_TOKEN)
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
   const run = async () => {
+    if (EXPOSED && !authorize(req)) {
+      sendError(res, 401, 'unauthorized')
+      return
+    }
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       await api(req, res, url)
       return

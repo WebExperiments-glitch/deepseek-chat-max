@@ -647,8 +647,8 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
               input: toResponsesInput(messages),
               instructions: system,
               ...(maxTokens === null ? {} : { max_output_tokens: maxTokens }),
-              temperature,
-              top_p: topP,
+              // 思考开启时不带采样参数：推理端点通常不接受 temperature/top_p
+              ...(initial.thinking ? {} : { temperature, top_p: topP }),
               ...(effort && (initial.thinking ?? false) ? { reasoning: { effort } } : {}),
               ...(now.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
               ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
@@ -682,8 +682,11 @@ export const streamReply = async (sessionId: string, initial: AssistantMessage, 
               stream: true,
               // 让 OpenAI 兼容网关在 SSE 末尾带上 usage；不加则第三方服务商拿不到 token 统计
               stream_options: { include_usage: true },
-              ...sampling,
-              ...(identity ? { user_id: identity.user_id } : {}),
+              // 思考模式开启时不带 temperature/top_p：不少推理模型（o 系列、R1 等）
+              // 在 thinking 开启时会拒绝这两个采样参数，默认 1 也没有实际意义。
+              ...(thinkingForEffort ? {} : sampling),
+              // OpenAI 标准的调用方标识字段是 user，不是 user_id（后者是 Anthropic 的约定）。
+              ...(identity ? { user: identity.user_id } : {}),
               ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
               ...(clientTools.length > 0 ? { tools: clientTools } : {}),
             },
