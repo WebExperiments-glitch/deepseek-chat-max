@@ -1,5 +1,25 @@
 [
   {
+    "id": "opencode-free",
+    "name": "OpenCode Free",
+    "baseURL": "https://opencode.ai/zen/v1",
+    "modelsURL": "https://opencode.ai/zen/v1/models",
+    "env": [],
+    "modelCount": 105,
+    "protocol": "openai",
+    "noKey": true,
+    "injectHeaders": {
+      "Authorization": "Bearer public",
+      "User-Agent": "opencode/stable/1.2.3/opencode",
+      "x-opencode-session": "$session",
+      "x-opencode-session-id": "$session",
+      "x-session-affinity": "$session",
+      "X-Session-Id": "$session",
+      "x-opencode-project": "global",
+      "x-opencode-client": "opencode"
+    }
+  },
+  {
     "id": "google",
     "name": "Google",
     "baseURL": "https://generativelanguage.googleapis.com/v1beta",

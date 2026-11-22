@@ -14,9 +14,33 @@ export type CatalogProvider = {
   /** 该供应商在 models.dev 的模型数量（排序/展示用） */
   modelCount: number
   protocol: 'openai' | 'anthropic'
+  /** 无需用户填 Key（如 OpenCode 免费网关，服务端注入伪装头） */
+  noKey?: boolean
+  /** 服务端代理注入的请求头（$session 为会话占位符） */
+  injectHeaders?: Record<string, string>
 }
 
 export const PROVIDER_CATALOG: CatalogProvider[] = [
+  {
+    "id": "opencode-free",
+    "name": "OpenCode Free",
+    "baseURL": "https://opencode.ai/zen/v1",
+    "modelsURL": "https://opencode.ai/zen/v1/models",
+    "env": [],
+    "modelCount": 105,
+    "protocol": "openai",
+    "noKey": true,
+    "injectHeaders": {
+      "Authorization": "Bearer public",
+      "User-Agent": "opencode/stable/1.2.3/opencode",
+      "x-opencode-session": "$session",
+      "x-opencode-session-id": "$session",
+      "x-session-affinity": "$session",
+      "X-Session-Id": "$session",
+      "x-opencode-project": "global",
+      "x-opencode-client": "opencode"
+    }
+  },
   {
     "id": "google",
     "name": "Google",

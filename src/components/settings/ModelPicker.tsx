@@ -10,7 +10,8 @@ import {
 } from '../../services/modelPicker.js'
 import { groupByProvider, latestPerFamily, pinSections, type ModelGroup } from '../../services/modelGroups.js'
 import { pushRecent, toggleFavorite, useModelPrefs } from '../../services/modelPrefs.js'
-import { setProviderModel, useSettings } from '../../services/settings.js'
+import { setProvider, setProviderModel, useSettings } from '../../services/settings.js'
+import { isProviderId } from '../../services/api/providers.js'
 import { useTranslate, type TranslationKey } from '../../i18n/index.js'
 import { showToast } from '../base/toastState.js'
 import { Tooltip } from '../base/Tooltip.js'
@@ -130,14 +131,14 @@ export const ModelPicker = () => {
     return groupByProvider(rest)
   }, [view, hasFilter, shown, sections])
 
+  // 抄 OpenCode：选择模型时同时切换服务商（model.set({modelID, providerID}, {recent:true})）
   const choose = (model: CatalogModel) => {
-    setProviderModel(provider, model.modelId)
     pushRecent(model.id)
-    if (model.providerId !== provider) {
-      showToast(`${model.name}（${model.providerName}）· ${tr(t, 'modelPickerSwitchProviderHint', '请切换到对应服务商后使用')}`)
-    } else {
-      showToast(tr(t, 'modelPickerSelected', '当前使用') + ': ' + model.name)
+    if (isProviderId(model.providerId) && model.providerId !== provider) {
+      setProvider(model.providerId)
     }
+    setProviderModel(model.providerId, model.modelId)
+    showToast(tr(t, 'modelPickerSelected', '当前使用') + ': ' + model.name)
   }
 
   const toggleCompare = (id: string) => {

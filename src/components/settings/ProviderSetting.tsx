@@ -8,6 +8,7 @@ import {
   useCustomProvider,
   type ProviderId,
 } from '../../services/api/providers.js'
+import { PROVIDER_CATALOG } from '../../services/api/providerCatalog.generated.js'
 import {
   setProvider,
   setProviderApiKey,
@@ -77,12 +78,13 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
     }
   }, [provider, customConfig.models])
 
-  // 已有 Key 但还没拉过清单时补拉一次
+  // 已有 Key（或免 Key 服务商）但还没拉过清单时补拉一次
+  const noKey = PROVIDER_CATALOG.find((p) => p.id === provider)?.noKey === true
   useEffect(() => {
-    if (apiKey && models.length === 0 && !loading) {
+    if ((apiKey || noKey) && models.length === 0 && !loading) {
       void refreshModels(provider)
     }
-  }, [apiKey, models.length, loading, provider])
+  }, [apiKey, noKey, models.length, loading, provider])
 
   // 网关没有文档化的默认模型：清单到达后自动选中第一条，避免发空 model
   useEffect(() => {
@@ -139,7 +141,9 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
   return (
     <>
       {provider === 'custom' ? <CustomProviderFields /> : null}
-      {apiKey ? (
+      {noKey ? (
+        <div className={styles.description}>{t('providerNoKeyNeeded')}</div>
+      ) : apiKey ? (
         <div className={styles.apiKeySaved}>
           <span className={styles.apiKeyMask}>{'*'.repeat(apiKey.length)}</span>
           <Button variant="outlined" size="s" onClick={() => setProviderApiKey(provider, null)}>

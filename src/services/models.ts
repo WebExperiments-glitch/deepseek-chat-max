@@ -7,6 +7,7 @@ import {
   useCustomProvider,
   type ProviderId,
 } from './api/providers.js'
+import { PROVIDER_CATALOG } from './api/providerCatalog.generated.js'
 import { useSettings } from './settings.js'
 import { mergeModelMeta } from './modelMeta.js'
 
@@ -56,7 +57,8 @@ export const refreshModels = async (providerId: ProviderId): Promise<void> => {
       return
     }
   }
-  const apiKey = useSettings.getState().apiKeys[providerId]
+  const noKey = PROVIDER_CATALOG.find((p) => p.id === providerId)?.noKey === true
+  const apiKey = useSettings.getState().apiKeys[providerId] || (noKey ? 'public' : '')
   if (!apiKey || useModels.getState().loading[providerId]) {
     return
   }

@@ -67,6 +67,10 @@ try {
   // 清单缺失时代理不可用，不影响其他功能
 }
 
+// 免费网关的会话标识：模拟 OpenCode 的 ses_<时间戳+随机> 格式，进程内稳定，
+// 用于路由亲和与 prompt 缓存复用（见 opencode SessionID.create）。
+const FREE_SESSION_ID = `ses_${Date.now().toString(16).padStart(12, '0').slice(-12)}${randomUUID().replace(/-/g, '').slice(0, 14)}`
+
 const proxyProvider = async (req, res, pathname) => {
   // pathname: /provider/<id>/<rest...>
   const parts = pathname.split('/').filter(Boolean)
@@ -83,8 +87,24 @@ const proxyProvider = async (req, res, pathname) => {
   const headers = {}
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue
-    if (['host', 'connection', 'content-length', 'transfer-encoding'].includes(key.toLowerCase())) continue
+    if (['host', 'connection', 'content-length', 'transfer-encoding', 'expect', 'accept-encoding'].includes(key.toLowerCase())) continue
     headers[key] = value
+  }
+  // 某些免费网关（如 OpenCode zen）无需用户 Key，由服务端注入伪装客户端头。
+  // 见 opencode.ts: 无 Key 时 apiKey="public"；model-request.ts 的 x-opencode-* 头。
+  if (provider.injectHeaders) {
+    for (const [key, value] of Object.entries(provider.injectHeaders)) {
+      // 先移除客户端同名头（忽略大小写），避免 Authorization 等重复导致服务端取错值
+      for (const existing of Object.keys(headers)) {
+        if (existing.toLowerCase() === key.toLowerCase()) {
+          delete headers[existing]
+        }
+      }
+      const resolved = typeof value === 'string' && value.includes('$session')
+        ? value.replace('$session', FREE_SESSION_ID)
+        : value
+      headers[key] = resolved
+    }
   }
 
   const method = req.method ?? 'GET'
@@ -92,7 +112,9 @@ const proxyProvider = async (req, res, pathname) => {
   const upstream = await fetch(target, {
     method,
     headers,
-    ...(hasBody ? { body: req } : {}),
+    // Node fetch 不支持把 IncomingMessage 直接当 body（UND_ERR_NOT_SUPPORTED），
+    // 先把请求体读成 Buffer；chat/embeddings 等请求体都很小。
+    ...(hasBody ? { body: Buffer.from(await readBody(req, MAX_BLOB)) } : {}),
   })
 
   // 回传状态码与响应头（去掉 hop-by-hop）

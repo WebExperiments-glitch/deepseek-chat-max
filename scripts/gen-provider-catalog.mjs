@@ -91,6 +91,29 @@ const catalog = finalProviders.map((e) => ({
   protocol: e.protocol,
 }))
 
+// OpenCode 免费网关（zen）：无需用户 Key，服务端注入伪装客户端头（抄 opencode 源码）。
+// 这些模型有免费额度限制（429 FreeUsageLimitError），仅作免 Key 体验用。
+catalog.unshift({
+  id: 'opencode-free',
+  name: 'OpenCode Free',
+  baseURL: 'https://opencode.ai/zen/v1',
+  modelsURL: 'https://opencode.ai/zen/v1/models',
+  env: [],
+  modelCount: 105,
+  protocol: 'openai',
+  noKey: true,
+  injectHeaders: {
+    Authorization: 'Bearer public',
+    'User-Agent': 'opencode/stable/1.2.3/opencode',
+    'x-opencode-session': '$session',
+    'x-opencode-session-id': '$session',
+    'x-session-affinity': '$session',
+    'X-Session-Id': '$session',
+    'x-opencode-project': 'global',
+    'x-opencode-client': 'opencode',
+  },
+})
+
 const header = `// 自动生成，勿手改。来源：models.dev api.json（MIT）。
 // 生成命令：node scripts/gen-provider-catalog.mjs
 // 这是「供应商品牌清单」：只存端点与 Key 名，模型元数据由 modelMeta.ts 运行时提供。
@@ -107,6 +130,10 @@ export type CatalogProvider = {
   /** 该供应商在 models.dev 的模型数量（排序/展示用） */
   modelCount: number
   protocol: 'openai' | 'anthropic'
+  /** 无需用户填 Key（如 OpenCode 免费网关，服务端注入伪装头） */
+  noKey?: boolean
+  /** 服务端代理注入的请求头（$session 为会话占位符） */
+  injectHeaders?: Record<string, string>
 }
 
 export const PROVIDER_CATALOG: CatalogProvider[] = ${JSON.stringify(catalog, null, 2)}

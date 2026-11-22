@@ -327,6 +327,7 @@ export const zh = {
   modelPickerViewGrid: '卡片',
   modelPickerLatestOnly: '仅最新',
   modelPickerSwitchProviderHint: '请切换到对应服务商后使用',
+  providerNoKeyNeeded: '免费服务商，无需 API Key；每日有免费额度，超限后请换其他模型或服务商。',
   settingsChatSection: '对话设置',
   settingsAdvancedSection: '高级功能',
   advancedSettingsIntro: '这里都是给进阶用户和开发者准备的设置，大多数情况保持默认即可。',

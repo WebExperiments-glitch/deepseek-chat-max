@@ -344,6 +344,7 @@ export const en = {
   modelPickerViewGrid: 'Grid',
   modelPickerLatestOnly: 'Latest only',
   modelPickerSwitchProviderHint: 'Switch to the matching provider to use this model',
+  providerNoKeyNeeded: 'Free provider — no API Key needed. Daily free quota applies; switch models if exceeded.',
   settingsChatSection: 'Chat settings',
   settingsAdvancedSection: 'Advanced',
   advancedSettingsIntro: 'These are for power users and developers. The defaults work for most people.',
