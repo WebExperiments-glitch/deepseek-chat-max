@@ -5,6 +5,7 @@
  * 浏览器不再直接持有 SQLite，只通过这层访问本机数据库。
  */
 import { http } from '../../ports/http.js'
+import { handleBrowserRequest } from './browserBackend.js'
 
 export class LocalServerError extends Error {
   constructor(
@@ -17,7 +18,12 @@ export class LocalServerError extends Error {
 }
 
 const request = async (path: string, init?: RequestInit): Promise<Response> => {
-  const response = await http(path, init)
+  // 静态模式：无本机 Node 服务，/api/* 路由到浏览器 IndexedDB 后端。
+  // 只拦 /api/*，模型请求与 /provider/* 仍走原 http 端口，互不影响。
+  const response =
+    __STATIC_MODE__ && path.startsWith('/api/')
+      ? await handleBrowserRequest(path, init)
+      : await http(path, init)
   if (!response.ok) {
     let message = response.statusText
     try {

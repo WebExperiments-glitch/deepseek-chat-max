@@ -28,19 +28,26 @@ type ConfigOptions = {
   apiOrigin?: string
   /** 开发服务器配置，支持本地接口代理 */
   devServer?: Configuration['devServer']
+  /**
+   * 纯静态模式：无本机 Node 服务，会话/记忆存浏览器 IndexedDB。
+   * 用 `pnpm build:static` 开启。第三方 provider 的本地代理不可用，
+   * 仅 DeepSeek（CORS 完整）与支持 CORS 的自定义端点可用。
+   */
+  staticMode?: boolean
 }
 
 /** 创建构建配置，支持自定义 API 地址和开发服务器选项 */
 export const createConfig = ({
   apiOrigin = 'https://api.deepseek.com',
   devServer,
+  staticMode = false,
 }: ConfigOptions = {}): Configuration => ({
   mode: dev ? 'development' : 'production',
   entry: './src/main.tsx',
   output: {
     path: path.resolve(root, 'dist'),
-    // 生产由本地服务从根路径托管，固定 '/'；开发交给 dev server 按脚本地址推导
-    publicPath: dev ? 'auto' : '/',
+    // 生产由本地服务从根路径托管，固定 '/'；静态部署用相对路径以支持任意子目录
+    publicPath: dev ? 'auto' : staticMode ? './' : '/',
     filename: 'static/js/[name].[contenthash:8].js',
     chunkFilename: 'static/js/async/[name].[contenthash:8].js',
     cssFilename: 'static/css/[name].[contenthash:8].css',
@@ -92,6 +99,7 @@ export const createConfig = ({
     new rspack.DefinePlugin({
       __API_ORIGIN__: JSON.stringify(apiOrigin),
       __DEV_PROXY_PREFIX__: JSON.stringify(dev ? DEV_PROXY_PREFIX : ''),
+      __STATIC_MODE__: JSON.stringify(staticMode),
     }),
     new rspack.CopyRspackPlugin({
       patterns: [
@@ -147,5 +155,8 @@ export const createConfig = ({
   },
 })
 
+// STATIC_MODE=1 时产出纯静态包：数据存浏览器 IndexedDB，无本机 Node 服务依赖。
 // eslint-disable-next-line import/no-default-export
-export default defineConfig(createConfig())
+export default defineConfig(
+  createConfig({ staticMode: process.env.STATIC_MODE === '1' })
+)

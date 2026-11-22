@@ -14,6 +14,7 @@
     "server": "node server/index.mjs",
     "start": "node server/index.mjs",
     "build": "node scripts/build.mjs",
+    "build:static": "node scripts/build.mjs --static",
     "build:wasm": "node scripts/build-wasm.mjs",
     "verify:wasm": "node scripts/verify-zip-wasm.mjs",
     "verify:batch": "node scripts/verify-batch-import.mjs",

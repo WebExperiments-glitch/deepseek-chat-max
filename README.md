@@ -53,7 +53,7 @@ This is an **engineering-complete DeepSeek client**, not a turnkey mass-market c
 - **Model-picker metadata is not a delivery guarantee**: displayed price/video capability is metadata browsing; whether an attachment can be sent depends on the current model's input modalities and whether it is DeepSeek.
 - **Shares are local-only snapshots**: links live in local SQLite and only open on this machine, not a public share (UI copy reflects this).
 - **Local-first and memory**: reading existing memories (local retrieval injected into context) is on by default; writing (a background `deepseek-flash` extraction after each reply — an extra paid API call) is **off** by default and must be enabled in settings. When enabled, conversation text is sent to the extraction model.
-- **Not a PWA / not for static hosting**: it needs the local Node service for the SQLite API; dropping `dist/` on static hosting (e.g. GitHub Pages) yields an empty shell. The repo ships local-run instructions only; CI runs type/lint/tests/build but does not deploy a static site.
+- **Two build modes**: local mode (default) uses Node + SQLite; static mode (`pnpm build:static`) stores data in browser IndexedDB for any static host. The two do **not** share data — export a ZIP backup regularly in static mode.
 
 ## Quick start
 
@@ -82,6 +82,20 @@ pnpm start
 Open <http://127.0.0.1:8787>. The database is created automatically at `data/chat-demo.db`; `data/` is gitignored.
 
 On first launch, legacy IndexedDB / sql.js data is detected and migrated to SQLite, with the old store kept as a rollback point.
+
+**Static deployment** (no Node service, data in the browser):
+
+```sh
+pnpm build:static
+# upload the whole dist/ dir to any static host (GitHub Pages / Tencent CloudBase / EdgeOne Pages ...)
+```
+
+Differences and limits in static mode:
+
+- **Data lives in browser IndexedDB** — never uploaded, not cross-device. Clearing browser data or switching devices loses it. Use Settings → Data → "Export browser data" to download a ZIP backup regularly, and import it on a new device.
+- **Only DeepSeek is fully usable**: third-party search (Tavily/Serper/Brave) and the 84-brand catalog rely on the local `/provider` proxy to bypass CORS, which a static host does not have; direct DeepSeek (CORS-enabled) works. Custom OpenAI-compatible endpoints work only if they allow CORS.
+- **Shares are local snapshots** — the link only works in the current browser (same as local mode).
+- Relative asset paths — deployable in any subdirectory.
 
 ## Features
 

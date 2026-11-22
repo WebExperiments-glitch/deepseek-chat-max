@@ -7,9 +7,37 @@ import { createId } from '../../utils/id.js'
 import * as db from '../../services/chat/db.js'
 import type { Message } from '../../services/chat/types.js'
 import { getShare, type Share } from '../../services/shares.js'
+import { getBlob } from '../../services/api/localServer.js'
 import styles from './SharedSessionPage.module.css'
 
 const SELECT_SESSION_KEY = 'chat-demo:select-session'
+
+/**
+ * 分享页图片：经 getBlob() 取原件再建 object URL。
+ * 这样静态模式下也能走 IndexedDB 闸口（直接写 <img src="/api/files/..."> 会绕过它）。
+ */
+const SharedImage = ({ id, name }: { id: string; name: string }) => {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let objectUrl: string | null = null
+    let cancelled = false
+    getBlob(`/api/files/${encodeURIComponent(id)}`)
+      .then((blob) => {
+        if (blob && !cancelled) {
+          objectUrl = URL.createObjectURL(blob)
+          setUrl(objectUrl)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [id])
+  return url ? <img className={styles.image} src={url} alt={name} /> : null
+}
 
 /** 分享页：只读快照；“继续聊”把快照复制成新的本地会话后回到主界面 */
 export const SharedSessionPage = ({ id }: { id: string }) => {
@@ -109,12 +137,7 @@ export const SharedSessionPage = ({ id }: { id: string }) => {
                       <div className={styles.files}>
                         {message.files.map((file) =>
                           file.isImage ? (
-                            <img
-                              key={file.id}
-                              className={styles.image}
-                              src={`/api/files/${encodeURIComponent(file.id)}`}
-                              alt={file.name}
-                            />
+                            <SharedImage key={file.id} id={file.id} name={file.name} />
                           ) : (
                             <span key={file.id} className={styles.file}>
                               {file.name}

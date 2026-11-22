@@ -11,6 +11,7 @@ export default defineConfig({
   define: {
     __API_ORIGIN__: JSON.stringify('https://api.deepseek.com'),
     __DEV_PROXY_PREFIX__: JSON.stringify(''),
+    __STATIC_MODE__: JSON.stringify(false),
   },
   test: {
     environment: 'node',

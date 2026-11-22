@@ -14,12 +14,17 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 rmSync(path.join(root, 'dist'), { recursive: true, force: true })
 
+const isStatic = process.argv.includes('--static')
 const bin = process.platform === 'win32' ? 'rspack.cmd' : 'rspack'
 const result = spawnSync(bin, ['build', '-c', 'rspack.config.ts'], {
   cwd: root,
   stdio: 'inherit',
   shell: true,
-  env: { ...process.env, NODE_ENV: 'production' },
+  env: {
+    ...process.env,
+    NODE_ENV: 'production',
+    ...(isStatic ? { STATIC_MODE: '1' } : {}),
+  },
 })
 
 if (result.error) {
