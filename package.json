@@ -59,6 +59,9 @@
     "vitest": "^3.2.7"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": ["esbuild"],
+    "overrides": {
+      "lodash-es": "4.18.0"
+    }
   }
 }
