@@ -22,6 +22,7 @@ import {
   useModels,
 } from '../../services/models.js'
 import { useModelMeta } from '../../services/modelMeta.js'
+import { probeAvailableModels } from '../../services/modelProbe.js'
 import { useTranslate } from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Select } from '../base/Select.js'
@@ -70,6 +71,9 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
   const [value, setValue] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [probing, setProbing] = useState(false)
+  const [probeProgress, setProbeProgress] = useState('')
+  const [probeMsg, setProbeMsg] = useState<string | null>(null)
 
   // 自定义服务商的模型来自手动清单，配置变化后立即同步
   useEffect(() => {
@@ -138,6 +142,59 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
         ? models.map((model) => ({ value: model.id, label: model.label }))
         : [{ value: defaultModel, label: defaultModel }]
 
+  /**
+   * 一键检测可用模型：先 /models（零成本），拿不到才小规模并发真实探测。
+   * 候选来自模型元数据目录里该服务商的条目 + 当前默认模型。
+   */
+  const runProbe = async () => {
+    const key = apiKey || (noKey ? 'public' : '')
+    if (!key || probing) {
+      return
+    }
+    setProbing(true)
+    setProbeMsg(null)
+    setProbeProgress('')
+    try {
+      const allMeta = useModelMeta.getState().entries
+      const catalogCandidates = Object.values(allMeta)
+        .filter((entry) => entry.providerId === provider)
+        .map((entry) => entry.id)
+      const candidates = [...new Set([defaultModel, ...manualModels.map((m) => m.id), ...catalogCandidates])].filter(
+        Boolean
+      )
+      const result = await probeAvailableModels(getProvider(provider), key, {
+        candidates,
+        onProgress: (done, total) => setProbeProgress(t('probeModelsProbing', { done, total })),
+      })
+      if (result.aborted === 'auth') {
+        setProbeMsg(t('probeModelsAbortedAuth'))
+        return
+      }
+      if (result.aborted === 'balance') {
+        setProbeMsg(t('probeModelsAbortedBalance'))
+        return
+      }
+      if (result.models.length === 0) {
+        setProbeMsg(t('probeModelsEmpty'))
+        return
+      }
+      // 写回可用模型列表并选中第一个，形成「检测 → 开聊」闭环
+      const available = result.models.map((id) => ({ id, label: id }))
+      useModels.setState((state) => ({ lists: { ...state.lists, [provider]: available } }))
+      setProviderModel(provider, result.models[0])
+      setProbeMsg(
+        result.source === 'models-endpoint'
+          ? t('probeModelsFromList', { n: result.models.length })
+          : t('probeModelsFromProbe', { tested: result.tested, n: result.models.length })
+      )
+    } catch {
+      setProbeMsg(t('probeModelsEmpty'))
+    } finally {
+      setProbing(false)
+      setProbeProgress('')
+    }
+  }
+
   return (
     <>
       {provider === 'custom' ? <CustomProviderFields /> : null}
@@ -189,6 +246,19 @@ const ProviderBody = ({ provider }: { provider: ProviderId }) => {
           onChange={(model) => setProviderModel(provider, model)}
         />
       </div>
+      {apiKey || noKey ? (
+        <div className={styles.modelRow}>
+          <Button
+            variant="outlined"
+            size="s"
+            disabled={probing || verifying}
+            onClick={() => void runProbe()}
+          >
+            {probing && probeProgress ? probeProgress : t('probeModelsButton')}
+          </Button>
+        </div>
+      ) : null}
+      {probeMsg ? <div className={styles.description}>{probeMsg}</div> : null}
       {meta ? (
         <div className={styles.description}>
           {meta.providerName}

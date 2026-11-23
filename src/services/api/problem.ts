@@ -14,6 +14,7 @@ import { ApiError } from './client.js'
 /** 稳定机器码：传输层与 UI 之间唯一的错误契约 */
 export type ApiProblemCode =
   | 'context_overflow' // 400/422 + 超长关键词：对话装不下
+  | 'unsupported_model' // 400/404：当前账号/服务商不支持所选模型——用户要换模型
   | 'payload_too_large' // 413：文件过大
   | 'auth_failed' // 401：密钥错误
   | 'insufficient_balance' // 402：余额不足
@@ -42,6 +43,7 @@ export type ApiProblemGroup =
 /** 码 → 归因 的穷尽映射（新增码必须归类，编译期兜底） */
 export const CODE_GROUP: Readonly<Record<ApiProblemCode, ApiProblemGroup>> = {
   context_overflow: 'content',
+  unsupported_model: 'content',
   payload_too_large: 'content',
   auth_failed: 'account',
   insufficient_balance: 'account',
@@ -79,7 +81,23 @@ export const CONTEXT_OVERFLOW_PATTERNS: ReadonlyArray<RegExp> = [
 export const isContextOverflowMessage = (message: string): boolean =>
   CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(message))
 
-/** 由 HTTP 状态码 + 服务端原文推导机器码（原文只用于超长关键词识别） */
+/**
+ * 「所选模型当前账号/服务商不支持」的原文特征。
+ * 实测 DeepSeek 400：`The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed gpt-4o.`
+ * 各家网关措辞不同，这里覆盖常见说法；只在 400/404 下启用，避免误伤其他错误。
+ */
+export const UNSUPPORTED_MODEL_PATTERNS: ReadonlyArray<RegExp> = [
+  /supported (api )?model names? (are|is)/i,
+  /model [`'"]?[\w.-]+[`'"]? (is )?(not (found|supported|available)|does not exist|unavailable)/i,
+  /(unsupported|invalid|unknown) model/i,
+  /model_not_found/i,
+  /the model .* does not exist/i,
+]
+
+export const isUnsupportedModelMessage = (message: string): boolean =>
+  UNSUPPORTED_MODEL_PATTERNS.some((pattern) => pattern.test(message))
+
+/** 由 HTTP 状态码 + 服务端原文推导机器码（原文只用于关键词识别） */
 export const codeFromStatus = (status: number, message: string): ApiProblemCode => {
   if (status === 401) {
     return 'auth_failed'
@@ -106,7 +124,16 @@ export const codeFromStatus = (status: number, message: string): ApiProblemCode 
     return 'server_error'
   }
   if (status === 400 || status === 422) {
-    return isContextOverflowMessage(message) ? 'context_overflow' : 'invalid_request'
+    if (isContextOverflowMessage(message)) {
+      return 'context_overflow'
+    }
+    if (isUnsupportedModelMessage(message)) {
+      return 'unsupported_model'
+    }
+    return 'invalid_request'
+  }
+  if (status === 404 && isUnsupportedModelMessage(message)) {
+    return 'unsupported_model'
   }
   if (status >= 500) {
     return 'server_error'

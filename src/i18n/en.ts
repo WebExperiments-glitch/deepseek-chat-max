@@ -94,6 +94,8 @@ export const en = {
   // Error-code upgrade: reassuring, localized text by cause. Raw machine errors are diagnostic-only.
   problemContextOverflow:
     'This conversation is getting long. I will tidy it up for you — your messages and history are all safe.',
+  problemUnsupportedModel:
+    'This model is not available for your account right now. Switch models to continue — your message is safe.',
   problemPayloadTooLarge: 'This file is a bit large. Compress it or switch formats to upload.',
   problemAuthFailed: 'Connection failed. Just check your API key.',
   problemInsufficientBalance: 'Your balance is used up. Top up to keep chatting — your draft is safe.',
@@ -161,6 +163,13 @@ export const en = {
     'This service does not allow cross-origin access. Retry through the dev server or a reverse proxy.',
   apiKeyInvalid: 'Invalid API Key. Please check it and try again.',
   apiKeyVerificationFailed: 'Verification failed: {message}',
+  probeModelsButton: 'Detect available models',
+  probeModelsProbing: 'Detecting… {done}/{total}',
+  probeModelsFromList: 'Found {n} available models from the provider list',
+  probeModelsFromProbe: 'Tested {tested} models, found {n} available',
+  probeModelsEmpty: 'No available models found — check your key or try another provider',
+  probeModelsAbortedAuth: 'Invalid key — detection stopped',
+  probeModelsAbortedBalance: 'Insufficient balance — detection stopped',
   historyImport: 'Import chat history',
   historyImportConfirm: 'Import',
   historyImportConfirmTitle: 'Import chat history?',

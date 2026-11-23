@@ -89,6 +89,8 @@ export const zh = {
   // 错误码升级：按归因给中文安抚文案。原始机器报错只留作诊断，不再直接展示。
   problemContextOverflow:
     '这段对话有点长了，我先帮您收一下。您写的内容和历史都还在，没有丢。',
+  problemUnsupportedModel:
+    '这个模型当前账号用不了，换个模型就能接着聊。您写的内容还在。',
   problemPayloadTooLarge: '这个文件偏大，压一压或换个格式就能传。',
   problemAuthFailed: '连接没通过，检查一下密钥就好。',
   problemInsufficientBalance: '账户额度用完了，充值后接着聊，刚才的内容我留着。',
@@ -156,6 +158,14 @@ export const zh = {
   replyCorsBlocked: '该服务未开放跨域访问，请通过本地开发服务器或自建反向代理后重试',
   apiKeyInvalid: 'API Key 无效，请检查后重试',
   apiKeyVerificationFailed: '校验失败：{message}',
+  // 模型可用性探测
+  probeModelsButton: '检测可用模型',
+  probeModelsProbing: '正在检测… {done}/{total}',
+  probeModelsFromList: '根据服务商清单，找到 {n} 个可用模型',
+  probeModelsFromProbe: '实测 {tested} 个，找到 {n} 个可用模型',
+  probeModelsEmpty: '没找到可用模型，请检查 Key 或换个服务商',
+  probeModelsAbortedAuth: '密钥无效，检测已停止',
+  probeModelsAbortedBalance: '账户余额不足，检测已停止',
   historyImport: '导入历史对话',
   historyImportConfirm: '确认导入',
   historyImportConfirmTitle: '确认导入历史对话？',

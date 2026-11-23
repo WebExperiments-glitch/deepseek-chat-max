@@ -13,6 +13,7 @@ import {
 /** 闸门自检：所有稳定码必须归类，且码集合与映射表完全一致（漏配/多配都会失败） */
 const ALL_CODES: ApiProblemCode[] = [
   'context_overflow',
+  'unsupported_model',
   'payload_too_large',
   'auth_failed',
   'insufficient_balance',
@@ -83,6 +84,25 @@ describe('超长识别：用户给的真实报错必须命中', () => {
   it('普通报错不误命中', () => {
     expect(isContextOverflowMessage('invalid api key')).toBe(false)
     expect(isContextOverflowMessage('insufficient balance')).toBe(false)
+  })
+})
+
+describe('不支持的模型：实测原文必须识别', () => {
+  it('命中 DeepSeek 真实的 400 原文', () => {
+    const raw =
+      'The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed gpt-4o. (request_id: 3ef78f0a-...)'
+    expect(codeFromStatus(400, raw)).toBe('unsupported_model')
+  })
+
+  it('命中各家常见措辞', () => {
+    expect(codeFromStatus(400, 'model_not_found: gpt-4o')).toBe('unsupported_model')
+    expect(codeFromStatus(404, 'The model xxx does not exist')).toBe('unsupported_model')
+    expect(codeFromStatus(400, 'unsupported model: foo')).toBe('unsupported_model')
+  })
+
+  it('普通 400 不误判为不支持的模型', () => {
+    expect(codeFromStatus(400, 'invalid api key')).toBe('invalid_request')
+    expect(codeFromStatus(400, 'bad request')).toBe('invalid_request')
   })
 })
 

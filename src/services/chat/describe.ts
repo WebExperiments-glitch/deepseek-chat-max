@@ -39,6 +39,7 @@ const PROBLEM_NOTICE: Readonly<Record<ApiProblemCode, NoticeSpec>> = {
     key: 'problemContextOverflow',
     actions: ['organize', 'switchModel', 'newDraft'],
   },
+  unsupported_model: { key: 'problemUnsupportedModel', actions: ['switchModel'] },
   payload_too_large: { key: 'problemPayloadTooLarge', actions: ['shrinkFile'] },
   auth_failed: { key: 'problemAuthFailed', actions: ['apiKey'] },
   insufficient_balance: { key: 'problemInsufficientBalance', actions: ['topUp'] },
