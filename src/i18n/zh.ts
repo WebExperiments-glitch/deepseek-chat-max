@@ -89,6 +89,8 @@ export const zh = {
   // 错误码升级：按归因给中文安抚文案。原始机器报错只留作诊断，不再直接展示。
   problemContextOverflow:
     '这段对话有点长了，我先帮您收一下。您写的内容和历史都还在，没有丢。',
+  problemUnsupportedModel:
+    '这个模型当前账号用不了，换个模型就能接着聊。您写的内容还在。',
   problemPayloadTooLarge: '这个文件偏大，压一压或换个格式就能传。',
   problemAuthFailed: '连接没通过，检查一下密钥就好。',
   problemInsufficientBalance: '账户额度用完了，充值后接着聊，刚才的内容我留着。',

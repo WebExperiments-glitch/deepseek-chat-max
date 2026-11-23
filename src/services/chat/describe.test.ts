@@ -50,13 +50,19 @@ describe('人话投影：原始英文绝不裸奔', () => {
       gateway_timeout: 504,
       server_error: 500,
       context_overflow: 400,
+      unsupported_model: 400,
       invalid_request: 400,
     }
     for (const code of Object.keys(CODE_GROUP) as ApiProblemCode[]) {
       const kind = code === 'network' ? 'network' : code === 'cors' ? 'cors' : code === 'protocol' ? 'protocol' : 'http'
       const status = statusByCode[code] ?? 418
-      // context_overflow 靠原文关键词识别，测试里给它真实超长文案
-      const raw = code === 'context_overflow' ? OVERFLOW_RAW : `RAW_MARKER_${code} (request_id: secret)`
+      // 这两个码靠原文关键词识别，测试里给真实文案（否则会落到 invalid_request）
+      const raw =
+        code === 'context_overflow'
+          ? OVERFLOW_RAW
+          : code === 'unsupported_model'
+            ? 'The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed gpt-4o.'
+            : `RAW_MARKER_${code} (request_id: secret)`
       const notice = expectNotice(describeReply(errorReply({ kind, message: raw, status })))
       expect(notice.text.trim().length, `code=${code} 文案不能为空`).toBeGreaterThan(0)
       expect(notice.text, `code=${code} 不能泄露原文`).not.toContain('RAW_MARKER')
@@ -72,6 +78,16 @@ describe('人话投影：动作与归因', () => {
     expect(notice.actions).toEqual(['organize', 'switchModel', 'newDraft'])
     expect(notice.group).toBe('content')
     expect(notice.action).toBe('organize')
+  })
+
+  it('不支持的模型：给换模型动作，不泄露服务端英文原文', () => {
+    const raw = 'The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed gpt-4o.'
+    const notice = expectNotice(describeReply(errorReply({ kind: 'http', message: raw, status: 400 })))
+    expect(notice.actions).toEqual(['switchModel'])
+    expect(notice.group).toBe('content')
+    expect(notice.text).toContain('换个模型')
+    expect(notice.text).not.toContain('supported API model names')
+    expect(notice.text).not.toContain('gpt-4o')
   })
 
   it('401 给检查密钥，402 给充值', () => {

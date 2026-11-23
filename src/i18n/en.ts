@@ -94,6 +94,8 @@ export const en = {
   // Error-code upgrade: reassuring, localized text by cause. Raw machine errors are diagnostic-only.
   problemContextOverflow:
     'This conversation is getting long. I will tidy it up for you — your messages and history are all safe.',
+  problemUnsupportedModel:
+    'This model is not available for your account right now. Switch models to continue — your message is safe.',
   problemPayloadTooLarge: 'This file is a bit large. Compress it or switch formats to upload.',
   problemAuthFailed: 'Connection failed. Just check your API key.',
   problemInsufficientBalance: 'Your balance is used up. Top up to keep chatting — your draft is safe.',
