@@ -423,3 +423,60 @@
     transition: none;
   }
 }
+
+/* 数据源切换：我的可用模型 / 全部目录 */
+.scopeTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+.scopeBtn,
+.scopeBtnActive {
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.scopeBtnActive {
+  color: var(--dsw-alias-brand-text);
+  border-bottom-color: var(--dsw-alias-brand-primary);
+}
+.mineRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+.mineInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.mineName {
+  font-weight: 600;
+  font-size: 14px;
+}
+.mineId {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+.mineActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
