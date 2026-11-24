@@ -18,6 +18,10 @@ import {
   exportHistory,
   importHistory,
 } from '../../services/chat/backup.js'
+import {
+  exportAllData,
+  importAllData,
+} from '../../services/api/browserBackup.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
@@ -188,6 +192,7 @@ const SettingsContent = () => {
               <FilesManager />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
+              {__STATIC_MODE__ ? <BrowserBackup /> : null}
               <ShareLinksManager />
               <SettingCell
                 label={t('deleteAllSessions')}
@@ -800,6 +805,126 @@ const TtsVoiceSetting = () => {
           />
         }
       />
+    </>
+  )
+}
+
+/**
+ * 浏览器数据备份（仅静态模式）：数据全在 IndexedDB，清浏览器数据即丢失，
+ * 所以提供一键导出 ZIP / 导入恢复。导入覆盖现有数据，需二次确认。
+ */
+const BrowserBackup = () => {
+  const t = useTranslate()
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<Status>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const onExport = async () => {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const blob = await exportAllData()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `deepseek-chat-backup-${new Date().toISOString().slice(0, 10)}.zip`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      setStatus({ key: 'browserBackupExported' })
+    } catch {
+      setStatus({ key: 'browserBackupExportFailed', error: true })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onImport = async () => {
+    const file = pendingFile
+    if (!file) {
+      return
+    }
+    setPendingFile(null)
+    setBusy(true)
+    setStatus(null)
+    try {
+      await importAllData(file)
+      setStatus({ key: 'browserBackupImported' })
+      // 让内存 store 重新从 IndexedDB 加载；留一点时间显示成功提示
+      setTimeout(() => window.location.reload(), 800)
+    } catch (error) {
+      setStatus({
+        key: 'browserBackupImportFailed',
+        params: { message: error instanceof Error ? error.message : String(error) },
+        error: true,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingCell
+        label={t('browserBackupLabel')}
+        description={t('browserBackupDescription')}
+        status={status}
+        action={
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".zip,application/zip"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) {
+                  setPendingFile(file)
+                }
+                event.target.value = ''
+              }}
+            />
+            <Button
+              variant="outlined"
+              size="m"
+              className={styles.cellButton}
+              disabled={busy}
+              onClick={() => void onExport()}
+            >
+              <IconDownloadOutline16 />
+              {t('browserBackupExport')}
+            </Button>
+            <Button
+              variant="outlined"
+              size="m"
+              className={styles.cellButton}
+              disabled={busy}
+              onClick={() => fileRef.current?.click()}
+            >
+              <IconUploadOutline14 />
+              {t('browserBackupImport')}
+            </Button>
+          </>
+        }
+      />
+      {pendingFile ? (
+        <Modal
+          title={t('browserBackupImportConfirmTitle')}
+          onClose={() => setPendingFile(null)}
+          footer={
+            <>
+              <Button variant="outlined" size="m" autoFocus onClick={() => setPendingFile(null)}>
+                {t('cancel')}
+              </Button>
+              <Button variant="dangerOutlined" size="m" onClick={() => void onImport()}>
+                {t('browserBackupImportConfirm')}
+              </Button>
+            </>
+          }
+        >
+          <div className={styles.importConfirmText}>{t('browserBackupImportConfirmText')}</div>
+        </Modal>
+      ) : null}
     </>
   )
 }
