@@ -180,6 +180,18 @@ export const zh = {
   historyExportDescription:
     '包含所有历史对话及本地图片原件；其他附件仅保留文件信息，不包含 API Key。',
   exportAllDownload: '下载',
+  // 浏览器数据备份（静态模式）
+  browserBackupLabel: '备份 / 恢复浏览器数据',
+  browserBackupDescription: '静态模式下数据只存在本浏览器，清除浏览器数据会丢失。请定期导出 ZIP 备份。',
+  browserBackupExport: '导出备份',
+  browserBackupImport: '导入恢复',
+  browserBackupExported: '备份已下载，请妥善保存',
+  browserBackupExportFailed: '导出失败，请重试',
+  browserBackupImported: '已恢复，页面即将刷新',
+  browserBackupImportFailed: '导入失败：{message}',
+  browserBackupImportConfirmTitle: '确认用备份覆盖当前数据？',
+  browserBackupImportConfirmText: '这会清空当前浏览器里的全部会话、附件和记忆，用备份文件替换。此操作不可撤销。',
+  browserBackupImportConfirm: '覆盖并恢复',
   deleteAllSessions: '删除所有对话',
   deleteAllSessionsModalTitle: '删除后，所有对话都将被清空且无法找回',
   deleteAllSessionsModalDescription: '本地保存的附件及未发送的草稿也将被删除。',

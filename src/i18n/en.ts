@@ -186,6 +186,17 @@ export const en = {
   historyExportDescription:
     'Includes all chat history and locally stored images. Other attachments retain file details only. Your API Key is not included.',
   exportAllDownload: 'Download',
+  browserBackupLabel: 'Back up / restore browser data',
+  browserBackupDescription: 'In static mode data lives only in this browser and is lost if you clear site data. Export a ZIP backup regularly.',
+  browserBackupExport: 'Export',
+  browserBackupImport: 'Restore',
+  browserBackupExported: 'Backup downloaded — keep it safe',
+  browserBackupExportFailed: 'Export failed, please retry',
+  browserBackupImported: 'Restored — reloading the page',
+  browserBackupImportFailed: 'Restore failed: {message}',
+  browserBackupImportConfirmTitle: 'Overwrite current data with this backup?',
+  browserBackupImportConfirmText: 'This clears all chats, attachments and memories in this browser and replaces them with the backup. It cannot be undone.',
+  browserBackupImportConfirm: 'Overwrite and restore',
   deleteAllSessions: 'Delete all chats',
   deleteAllSessionsModalTitle: 'Once deleted, all chats will be cleared and cannot be recovered.',
   deleteAllSessionsModalDescription:
