@@ -11,6 +11,7 @@ import {
 import { groupByProvider, latestPerFamily, pinSections, type ModelGroup } from '../../services/modelGroups.js'
 import { pushRecent, toggleFavorite, useModelPrefs } from '../../services/modelPrefs.js'
 import { setProvider, setProviderModel, useSettings } from '../../services/settings.js'
+import { useModels } from '../../services/models.js'
 import { isProviderId } from '../../services/api/providers.js'
 import { useTranslate, type TranslationKey } from '../../i18n/index.js'
 import { showToast } from '../base/toastState.js'
@@ -54,6 +55,7 @@ export const ModelPicker = () => {
   const favorites = useModelPrefs((state) => state.favorite)
   const recent = useModelPrefs((state) => state.recent)
 
+  const [scope, setScope] = useState<'mine' | 'all'>('mine')
   const [text, setText] = useState('')
   const [price, setPrice] = useState<PriceFilter>('any')
   const [context, setContext] = useState<ContextFilter>('any')
@@ -71,6 +73,10 @@ export const ModelPicker = () => {
   useEffect(() => {
     void loadModelCatalog()
   }, [])
+
+  // 「我的模型」= 当前 Key 真实可用的清单（/models 或一键检测的结果），不是 4380 全量目录
+  const mineModels = useModels((state) => state.lists[provider])
+  const mineLoading = useModels((state) => state.loading[provider])
 
   const filter = useMemo<ModelFilter>(() => {
     const f: ModelFilter = { text }
@@ -184,8 +190,78 @@ export const ModelPicker = () => {
     onCompare: () => toggleCompare(m.id),
   })
 
+  // 数据源切换：默认只显示当前 Key 真正能用的模型；「全部目录」才是 4380 的探索视图
+  const scopeTab = (
+    <div className={styles.scopeTabs}>
+      <button
+        type="button"
+        className={scope === 'mine' ? styles.scopeBtnActive : styles.scopeBtn}
+        onClick={() => setScope('mine')}
+      >
+        {tr(t, 'modelPickerScopeMine', '我的可用模型')}
+        {mineModels.length > 0 ? ` (${mineModels.length})` : ''}
+      </button>
+      <button
+        type="button"
+        className={scope === 'all' ? styles.scopeBtnActive : styles.scopeBtn}
+        onClick={() => setScope('all')}
+      >
+        {tr(t, 'modelPickerScopeAll', '全部目录')}
+      </button>
+    </div>
+  )
+
+  if (scope === 'mine') {
+    return (
+      <div className={styles.root}>
+        {scopeTab}
+        <div className={styles.intro}>{tr(t, 'modelPickerMineIntro', '这里只显示当前密钥真正能用的模型。填入 API Key 后会自动检测；也可以到设置里点「检测可用模型」。')}</div>
+        {mineLoading ? (
+          <div className={styles.description}>{tr(t, 'modelPickerMineLoading', '正在读取模型清单…')}</div>
+        ) : mineModels.length === 0 ? (
+          <div className={styles.description}>{tr(t, 'modelPickerMineEmpty', '还没有检测到可用模型。请先在「数据管理」里填好 API Key，再点「检测可用模型」。')}</div>
+        ) : (
+          <div className={styles.list}>
+            {mineModels.map((model) => {
+              const active = model.id === savedModel
+              return (
+                <div key={model.id} className={styles.mineRow}>
+                  <div className={styles.mineInfo}>
+                    <span className={styles.mineName}>{model.label}</span>
+                    <span className={styles.mineId}>{model.id}</span>
+                    {model.contextWindow ? (
+                      <span className={styles.modality}>{fmtContext(model.contextWindow)}</span>
+                    ) : null}
+                  </div>
+                  <div className={styles.mineActions}>
+                    <button type="button" className={styles.iconBtn} onClick={() => toggleFavorite(model.id)}>
+                      {favorites.includes(model.id) ? '★' : '☆'}
+                    </button>
+                    <button
+                      type="button"
+                      className={active ? styles.chooseActive : styles.choose}
+                      disabled={active}
+                      onClick={() => {
+                        pushRecent(model.id)
+                        setProviderModel(provider, model.id)
+                        showToast(tr(t, 'modelPickerSelected', '当前使用') + ': ' + model.label)
+                      }}
+                    >
+                      {active ? tr(t, 'modelPickerSelected', '当前使用') : tr(t, 'modelPickerSelect', '选用')}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={styles.root}>
+      {scopeTab}
       <div className={styles.intro}>{tr(t, 'modelPickerIntro', '从上万个模型中按价格、上下文、能力筛选，挑一个最适合你的。数据来自公开模型库，每天更新。')}</div>
 
       <div className={styles.searchRow}>
